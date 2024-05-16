@@ -1,0 +1,9 @@
+[package]
+name = "html_to_md"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+html5ever = "0.27"
+markup5ever_rcdom = "0.3"
+itertools = "0.12.1"
