@@ -81,6 +81,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    assert!(SECRET_KEY.len() > 10);
+
     let nostr_account_to_followers: FxHashMap<PublicKey, Arc<HashSet<String>>> =
         if let Ok(s) = tokio::fs::read_to_string("nostr_accounts.json").await {
             serde_json::from_str(&s).unwrap()
