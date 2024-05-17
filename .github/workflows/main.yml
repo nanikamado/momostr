@@ -1,0 +1,68 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+env:
+  SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  RSA_PRIVATE_KEY: |-
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDFjJ4GkSpw8Z6p
+    GiT2RsXy+CvPj38QcZCYF+CtQe/hRQHmVbb/C5yeG2zYm+6XPubjJnqVA0bIa3w6
+    SYveuYRlUd6TnTIYfUdCFv+rdFi612QzTB+IJEoJA6BZ8iq4VIlvwWaSSGVvbvXd
+    k7HyIQWbof8GmfJF6mq+BIYtH9clip3Rs1ebQYisBiSbrYhhsx+OE1QMMgLcfSw6
+    86KsX96MhFoevW5ZNzfdJNRmfr5mjUeeb6bBClkepT8y3xTbzQV9/wHAxEObSr1V
+    XpoX8jiw1QFoOldeMkY/yNxyCceyAXg+BZuwdI933q8ViYoMr+Gd45N/QXGyCn/7
+    si0CdQbbAgMBAAECggEABDyTSQXE+L4dzneaklOLPD45Rk7IBVTCKpjcfyq6V8Tw
+    mP1+mrKnjbZ925lggQrezcFOALMcygCQHfnkz4aAAeJDGTxWTjMlm5O9sPIiUwN6
+    iSUZSgSpN89FmZg5dVGOzwBBUGLQFhc1m6ZmuxAdPCy5uO0FRp2T43ZaYE5eAVaR
+    jQJt0hO/t9Nw1FNAtt9iQMXRwdEFtUlBfOvxokqQ3t4EbzS+T5TgZ4BYU8kIvRO6
+    Gjr6rsR0EmYahM+sVUQzbnv5cdLzcelMYnVqmlvufWwIQuup0jnDRtDH/vMk4PCM
+    6uHVZsrHKIk94jikwi+TdblHy+uc90K2EYDHEA51JQKBgQDluGCiQ7notZAwq9gJ
+    c2t5J80z5PgtZCTonP1rUx3Q8336oteqy6UmvGOOis3uBv2U5CBQUvN6Usg0k/bm
+    V8J1+tbtx4t3RFXTnQNHp4Ea8THI1QJqh7pcoP/Fdv7BKk8iLBIBbYiaI8AMf9tq
+    98ZrkBQj7axAWs4cbmmQ36TvDwKBgQDcJhOgk5+0cKYZ3Ww19dIlUtzXotliqirF
+    Fl6qDhaVNt75t5uJwUO/pE6ODba6rZ2CGo6OfBbmSoLOKk0nJmoOy6qBHPDNo8av
+    qUZ0obRx7LatPs89o0V1faANGliO2QknFwF8GBXzczFpCOE3PxudV4irjDnelJXZ
+    /vfRcU/rdQKBgHmnqi1ktojB1omgB/oBUPJJnMeVw8SuG0nBEggLbWfh+16HbLV7
+    wYuBCyxK4AHlW9fE9EP1mhG202Xc0k1sPoSigb5NBdP0sYsuxLTmxV2STC4yeGQY
+    Wx6A+NMHUKTVljDfq+1rp4MR2bwE3huI+mCuXawlSyqNrEesRWW+uqcLAoGBAI9g
+    FQRNYIOpoePSezkhYb2BG+csXhuN69Dz4q8qAbcoR0unMpsizTawkaCeedVWYPBs
+    z08ordlJyarvjdPjhssgBWmVKZckBLA+tG4dKmHP4qEt+NaR0RjVujkOYYKXAwj8
+    SLFDFni5GwLnD5ZleVydt5rR9pZperbBATDcdUpJAoGAYM3GxAwSdvnU1Fv7f+Sc
+    wgpRpBafFWWQz0BE2lU6c25w+e7pqcSm1QMbEKsGmwqYInJr+x2U/QSSLpk8ZG6G
+    f+HgE4clUe+0WqqTkVoa4SZkAzircyvM2gq2yiTLciLQlP49UpxO02qpR9NR4oPQ
+    YU/ldBogehl1EPk5XEPkqAU=
+    -----END PRIVATE KEY-----
+  ROCKS_DB_INBOX_TO_ID: inbox_to_id.rocksdb
+  ROCKS_DB_ID_TO_INBOX: id_to_inbox.rocksdb
+  ROCKS_DB_EVENT_ID_TO_INBOXES: event_id_to_inboxes.rocksdb
+  ROCKS_DB_NOSTR_TO_FOLLOWEE: follow_list.rocksdb
+  ROCKS_DB_STOPPED_NPUB: stopped_npub.rocksdb
+  ROCKS_DB_STOPPED_AP: stopped_ap.rocksdb
+  ROCKS_DB_AP_ID_TO_EVENT_ID: ap_id_to_event_id.rocksdb
+  BOT_NSEC: nsec1h5zs3rde7w3q269cvgsrfqp3xlw658c5wsvk6pwekvr524sktqjq7grskw
+  AP_RELAYS: ""
+  METADATA_RELAYS: ""
+  OUTBOX_RELAYS: ""
+  INBOX_RELAYS: ""
+  MAIN_RELAYS: ""
+  DOMAIN: momostr.test
+  HTTPS_DOMAIN: https://momostr.test
+  NOTE_ID_PREFIX: https://momostr.test/notes/
+  USER_ID_PREFIX: https://momostr.test/users/
+  BIND_ADDRESS: 127.0.0.1:8001
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo fmt --all -- --check
+    - run: cargo clippy --all-targets --all-features -- -D warnings
+    - run: cargo test --all

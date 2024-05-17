@@ -493,8 +493,9 @@ fn check_event<RelayId>(
 
 impl<RelayId> Drop for EventStream<RelayId> {
     fn drop(&mut self) {
-        // FIXME: `Err(Closed(..))` is returned when doing `cargo test media_test`
-        let _ = self.tx_for_ops.try_send(FilterOp::Unsubscribe(self.id));
+        self.tx_for_ops
+            .try_send(FilterOp::Unsubscribe(self.id))
+            .unwrap();
     }
 }
 

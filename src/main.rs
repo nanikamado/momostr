@@ -87,7 +87,7 @@ async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,ap=debug,relay_pool=debug".into()),
+                .unwrap_or_else(|_| "info,momostr=debug,relay_pool=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
