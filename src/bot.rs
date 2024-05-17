@@ -23,7 +23,7 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                 state.db.stop_ap(id.to_string());
                 "Stopped. \
                     Send `restart my mirror` to this bot \
-                    if you want to restart your mirror account in Fidiverse."
+                    if you want to restart your mirror account on the Fediverse."
                     .to_string()
             }
         } else if command == "restart my mirror" {
@@ -46,7 +46,7 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                 state.db.stop_npub(npub);
                 "Stopped. \
                     Send `restart my mirror` to this bot \
-                    if you want to restart your mirror account in Fidiverse."
+                    if you want to restart your mirror account on the Fediverse."
                     .to_string()
             }
         } else if command == "restart my mirror" {
@@ -75,8 +75,8 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                 } else {
                     "Restarted but, \
                     but we are currently not mirroring your account because \
-                    you don't have any follower in Fediverse. \
-                    We will start mirroring your account once someone in Fediverse follows you."
+                    you don't have any followers on the Fediverse. \
+                    We will start mirroring your account once someone on the Fediverse follows you."
                         .to_string()
                 }
             } else if state
@@ -89,8 +89,8 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
             } else {
                 "Your mirror is not stopped, \
                     but we are currently not mirroring your account because \
-                    you don't have any follower in Fediverse. \
-                    We will start mirroring your account once someone in Fediverse follows you."
+                    you don't have any followers on the Fediverse. \
+                    We will start mirroring your account once someone on the Fediverse follows you."
                     .to_string()
             }
         } else {
