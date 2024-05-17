@@ -250,11 +250,7 @@ fn handle_event(
                     .get(reacted_p)
                     .cloned();
                 let tmp: String;
-                let p = state
-                    .activitypub_accounts
-                    .lock()
-                    .get(reacted_p)
-                    .map(|a| a.clone());
+                let p = state.activitypub_accounts.lock().get(reacted_p).cloned();
                 let activity = ReactionForSer {
                     actor: &author,
                     id: &event.id.to_bech32().unwrap(),
@@ -356,11 +352,7 @@ fn handle_event(
                         uppercase: false,
                         ..
                     } => {
-                        p = state
-                            .activitypub_accounts
-                            .lock()
-                            .get(public_key)
-                            .map(|a| a.clone());
+                        p = state.activitypub_accounts.lock().get(public_key).cloned();
                     }
                     _ => (),
                 }
@@ -800,7 +792,7 @@ fn get_ap_id_from_proxied_event(event: &Event) -> Result<String, GetProxiedEvent
                 proxy = Some(id.clone());
             }
             Tag::LabelNamespace(values) => {
-                from_this_server |= values == &*REVERSE_DNS;
+                from_this_server |= *values == *REVERSE_DNS;
             }
             _ => (),
         }
@@ -1007,11 +999,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                 ..
             } = t
             {
-                state
-                    .activitypub_accounts
-                    .lock()
-                    .get(public_key)
-                    .map(|a| a.clone())
+                state.activitypub_accounts.lock().get(public_key).cloned()
             } else {
                 None
             }

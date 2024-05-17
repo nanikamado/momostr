@@ -32,7 +32,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const DOMAIN: &str = env!("DOMAIN");
-const REVERSE_DNS: Lazy<String> = Lazy::new(|| DOMAIN.split('.').rev().join("."));
+static REVERSE_DNS: Lazy<String> = Lazy::new(|| DOMAIN.split('.').rev().join("."));
 const HTTPS_DOMAIN: &str = env!("HTTPS_DOMAIN");
 const NOTE_ID_PREFIX: &str = env!("NOTE_ID_PREFIX");
 const USER_ID_PREFIX: &str = env!("USER_ID_PREFIX");
@@ -217,12 +217,12 @@ async fn dead_lock_detection() -> Result<(), error::Error> {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60 * 2)).await;
         for deadlock in parking_lot::deadlock::check_deadlock() {
-            for deadlock in deadlock {
+            if let Some(d) = deadlock.first() {
                 return Err(error::Error::Internal(
                     anyhow::anyhow!(format!(
                         "found deadlock {}:\n{:?}",
-                        deadlock.thread_id(),
-                        deadlock.backtrace()
+                        d.thread_id(),
+                        d.backtrace()
                     ))
                     .into(),
                 ));
