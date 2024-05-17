@@ -66,7 +66,7 @@ async fn broadcast_to_actors<A: Serialize, S: AsRef<str>>(
         }
     }
     if to_relay {
-        for inbox in AP_RELAYS {
+        for inbox in &*AP_RELAYS {
             let inbox = axum::http::Uri::from_str(inbox).unwrap();
             if sent.insert(inbox.clone()) {
                 if let Err(e) = state.send_activity(&inbox, author, &activity).await {
@@ -800,7 +800,7 @@ fn get_ap_id_from_proxied_event(event: &Event) -> Result<String, GetProxiedEvent
                 proxy = Some(id.clone());
             }
             Tag::LabelNamespace(values) => {
-                from_this_server |= values == REVERSE_DNS;
+                from_this_server |= values == &*REVERSE_DNS;
             }
             _ => (),
         }

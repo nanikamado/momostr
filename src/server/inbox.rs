@@ -189,7 +189,8 @@ pub async fn http_post_inbox(
                         (
                             SingleLetterTag::lowercase(Alphabet::L),
                             [nostr_lib::GenericTagValue::String(format!(
-                                "{REVERSE_DNS}.activitypub:{id}",
+                                "{}.activitypub:{id}",
+                                *REVERSE_DNS
                             ))]
                             .into_iter()
                             .collect(),
@@ -446,7 +447,7 @@ fn get_npub_from_actor_id(id: &str) -> Option<PublicKey> {
 }
 
 pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<Tag> {
-    let id_for_l = format!("{REVERSE_DNS}.activitypub:{id}");
+    let id_for_l = format!("{}.activitypub:{id}", *REVERSE_DNS);
     tags.into_iter()
         .chain([
             Tag::Proxy {

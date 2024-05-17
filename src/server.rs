@@ -237,7 +237,7 @@ pub async fn nostr_json(
             name: actor.npub,
         },
         "relays": {
-            actor.npub.to_string(): OUTBOX_RELAYS,
+            actor.npub.to_string(): &*OUTBOX_RELAYS,
         }
     }))
     .into_response();

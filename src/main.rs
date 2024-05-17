@@ -31,32 +31,43 @@ use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-const DOMAIN: &str = "momostr.pink";
-const REVERSE_DNS: &str = "pink.momostr";
-const HTTPS_DOMAIN: &str = "https://momostr.pink";
-const NOTE_ID_PREFIX: &str = "https://momostr.pink/notes/";
-const USER_ID_PREFIX: &str = "https://momostr.pink/users/";
-const BIND_ADDRESS: &str = "127.0.0.1:8001";
+const DOMAIN: &str = env!("DOMAIN");
+const REVERSE_DNS: Lazy<String> = Lazy::new(|| DOMAIN.split('.').rev().join("."));
+const HTTPS_DOMAIN: &str = env!("HTTPS_DOMAIN");
+const NOTE_ID_PREFIX: &str = env!("NOTE_ID_PREFIX");
+const USER_ID_PREFIX: &str = env!("USER_ID_PREFIX");
+const BIND_ADDRESS: &str = env!("BIND_ADDRESS");
 const SECRET_KEY: &str = env!("SECRET_KEY");
-const RELAYS: &[&str] = &[
-    "wss://relay.nostr.band",
-    "wss://relay.primal.net",
-    "ws://localhost:8007",
-];
-const INBOX_RELAYS: &[&str] = &[
-    "wss://relay.momostr.pink",
-    "wss://relay.primal.net",
-    "wss://relay.nostr.band",
-];
-const OUTBOX_RELAYS: &[&str] = &["wss://relay.momostr.pink"];
-const METADATA_RELAYS: &[&str] = &[
-    "wss://relay.nostr.band",
-    "wss://relay.primal.net",
-    "ws://localhost:8007",
-    "wss://purplepag.es",
-    "wss://directory.yabu.me",
-];
-const AP_RELAYS: &[&str] = &["https://relay.fedibird.com/inbox"];
+static RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("MAIN_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
+static INBOX_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("INBOX_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
+static OUTBOX_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("OUTBOX_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
+static METADATA_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("METADATA_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
+static AP_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("AP_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
 const CONTACT_LIST_LEN_LIMIT: usize = 500;
 static BOT_SEC: Lazy<SecretKey> = Lazy::new(|| SecretKey::from_bech32(env!("BOT_NSEC")).unwrap());
 static BOT_PUB: Lazy<PublicKey> =
@@ -117,7 +128,7 @@ async fn main() {
         Arc::new((0..relays.len()).map(|a| RelayId(a as u32)).collect());
     let mut relay_count = RELAYS.len();
     let mut metadata_relays = FxHashSet::default();
-    for mr in METADATA_RELAYS {
+    for mr in &*METADATA_RELAYS {
         let i = if let Some(i) = RELAYS.iter().position(|r| r == mr) {
             RelayId(i as u32)
         } else {
