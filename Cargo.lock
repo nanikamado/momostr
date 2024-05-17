@@ -87,52 +87,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 
 [[package]]
-name = "ap"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-recursion",
- "axum",
- "axum-extra",
- "axum-macros",
- "base64 0.22.0",
- "cached",
- "chrono",
- "dirs",
- "futures-util",
- "html-escape",
- "html_to_md",
- "httpdate",
- "itertools",
- "line-span",
- "linkify",
- "lru",
- "mediatype",
- "nostr",
- "once_cell",
- "parking_lot",
- "percent-encoding",
- "rand",
- "regex",
- "relay_pool",
- "reqwest",
- "rmp-serde",
- "rocksdb",
- "rsa",
- "rustc-hash",
- "serde",
- "serde_json",
- "sha2",
- "sha3",
- "sigh",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "async-recursion"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1395,6 +1349,52 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "momostr"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-recursion",
+ "axum",
+ "axum-extra",
+ "axum-macros",
+ "base64 0.22.0",
+ "cached",
+ "chrono",
+ "dirs",
+ "futures-util",
+ "html-escape",
+ "html_to_md",
+ "httpdate",
+ "itertools",
+ "line-span",
+ "linkify",
+ "lru",
+ "mediatype",
+ "nostr",
+ "once_cell",
+ "parking_lot",
+ "percent-encoding",
+ "rand",
+ "regex",
+ "relay_pool",
+ "reqwest",
+ "rmp-serde",
+ "rocksdb",
+ "rsa",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "sigh",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
