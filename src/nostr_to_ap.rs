@@ -1098,14 +1098,22 @@ mod tests {
     use lru::LruCache;
     use nostr_lib::nips::nip19::Nip19Event;
     use nostr_lib::{FromBech32, ToBech32};
+    use once_cell::sync::Lazy;
     use parking_lot::Mutex;
     use relay_pool::RelayPool;
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::num::NonZeroUsize;
     use std::sync::Arc;
-    use tokio::sync::OnceCell;
+    use tokio::runtime::Runtime;
 
-    static APP_STATE: OnceCell<Arc<AppState>> = OnceCell::const_new();
+    static RT: Lazy<Runtime> = Lazy::new(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    });
+
+    static APP_STATE: tokio::sync::OnceCell<Arc<AppState>> = tokio::sync::OnceCell::const_new();
 
     async fn get_state() -> &'static Arc<AppState> {
         APP_STATE
@@ -1115,7 +1123,7 @@ mod tests {
                 // tracing_subscriber::registry()
                 //     .with(
                 //         tracing_subscriber::EnvFilter::try_from_default_env()
-                //             .unwrap_or_else(|_| "info,ap=debug,relay_pool=trace".into()),
+                //             .unwrap_or_else(|_| "debug,momostr=trace,relay_pool=trace".into()),
                 //     )
                 //     .with(tracing_subscriber::fmt::layer())
                 //     .init();
@@ -1155,10 +1163,8 @@ mod tests {
             .await
     }
 
-    // FIXME: the following tests sometimes fail
-
-    #[tokio::test]
-    async fn media_test_1() {
+    #[test]
+    fn media_test_1() {
         let s = r#"aaa!!
 
 https://example.com
@@ -1167,14 +1173,16 @@ https://example.com
 
 https://example.com
         "#;
-        let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
-        assert!(q.is_none());
-        assert_eq!(content.misskey, s.trim());
-        assert_eq!(media.len(), 1);
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            assert!(q.is_none());
+            assert_eq!(content.misskey, s.trim());
+            assert_eq!(media.len(), 1);
+        });
     }
 
-    #[tokio::test]
-    async fn media_test_2() {
+    #[test]
+    fn media_test_2() {
         let s = r#"#あああ
 いいい
 https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
@@ -1183,14 +1191,16 @@ https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 "#;
-        let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
-        assert!(q.is_none());
-        assert_eq!(content.misskey, "#あああ\nいいい\n");
-        assert_eq!(media.len(), 4);
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            assert!(q.is_none());
+            assert_eq!(content.misskey, "#あああ\nいいい\n");
+            assert_eq!(media.len(), 4);
+        });
     }
 
-    #[tokio::test]
-    async fn media_test_3() {
+    #[test]
+    fn media_test_3() {
         let s = r#"#あああ
 いいい
 https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
@@ -1198,107 +1208,123 @@ https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 https://i.gyazo.com/09026f13790f738e9cd379354eefe6db.jpg
 "#;
-        let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
-        assert!(q.is_none());
-        assert_eq!(
-            content.misskey,
-            "#あああ
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            assert!(q.is_none());
+            assert_eq!(
+                content.misskey,
+                "#あああ
 いいい
 https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 う\n"
-        );
-        assert_eq!(media.len(), 3);
+            );
+            assert_eq!(media.len(), 3);
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_4() {
+    #[test]
+    fn media_test_4() {
         let s = r#"
 
         https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 
         "#;
-        let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
-        assert!(q.is_none());
-        assert_eq!(content.html, "");
-        assert_eq!(media.len(), 1);
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            assert!(q.is_none());
+            assert_eq!(content.html, "");
+            assert_eq!(media.len(), 1);
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_5() {
+    #[test]
+    fn media_test_5() {
         let event = "nevent1qqs2036kav4rsz3javzuf349vzmtwdnq47xqz3yj2jtu97lckzsgkvqzyp78yctwuy65cpyujmqnun68qw0qxe560p5c7khpszf0h5emtlghsqgewaehxw309aex2mrp0yhx6mmddaehgu3wwp5ku6e0gtcgdg";
         let s = format!(r#": nostr:{event}"#);
-        let state = get_state().await;
-        let (media, content, q) = media(state, &s, &mut FxHashMap::default()).await;
-        assert_eq!(content.html, format!("<span>: </span><br><span><br>RE: </span><a href=\"https://coracle.social/{event}\">https://coracle.social/{event}</a>"));
-        assert_eq!(media.len(), 0);
-        assert_eq!(
-            q.unwrap().ap_id.strip_prefix(NOTE_ID_PREFIX).unwrap(),
-            Nip19Event::from_bech32(event)
-                .unwrap()
-                .event_id
-                .to_bech32()
-                .unwrap()
-        )
+        RT.block_on(async {
+            let state = get_state().await;
+            let (media, content, q) = media(state, &s, &mut FxHashMap::default()).await;
+            assert_eq!(content.html, format!("<span>: </span><br><span><br>RE: </span><a href=\"https://coracle.social/{event}\">https://coracle.social/{event}</a>"));
+            assert_eq!(media.len(), 0);
+            assert_eq!(
+                q.unwrap().ap_id.strip_prefix(NOTE_ID_PREFIX).unwrap(),
+                Nip19Event::from_bech32(event)
+                    .unwrap()
+                    .event_id
+                    .to_bech32()
+                    .unwrap()
+            )
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_6() {
+    #[test]
+    fn media_test_6() {
         let event = "nevent1qqs2036kav4rsz3javzuf349vzmtwdnq47xqz3yj2jtu97lckzsgkvqzyp78yctwuy65cpyujmqnun68qw0qxe560p5c7khpszf0h5emtlghsqgewaehxw309aex2mrp0yhx6mmddaehgu3wwp5ku6e0gtcgdg";
         let s = format!(": \nnostr:{event}");
-        let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
-        assert_eq!(content.misskey, ": \n");
-        assert_eq!(media.len(), 0);
-        assert_eq!(
-            q.unwrap().ap_id.strip_prefix(NOTE_ID_PREFIX).unwrap(),
-            Nip19Event::from_bech32(event)
-                .unwrap()
-                .event_id
-                .to_bech32()
-                .unwrap()
-        )
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
+            assert_eq!(content.misskey, ": \n");
+            assert_eq!(media.len(), 0);
+            assert_eq!(
+                q.unwrap().ap_id.strip_prefix(NOTE_ID_PREFIX).unwrap(),
+                Nip19Event::from_bech32(event)
+                    .unwrap()
+                    .event_id
+                    .to_bech32()
+                    .unwrap()
+            )
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_7() {
+    #[test]
+    fn media_test_7() {
         let event = "nevent1qqs2036kav4rsz3javzuf349vzmtwdnq47xqz3yj2jtu97lckzsgkvqzyp78yctwuy65cpyujmqnun68qw0qxe560p5c7khpszf0h5emtlghsqgewaehxw309aex2mrp0yhx6mmddaehgu3wwp5ku6e0gtcgdg";
         let s = format!(": \nnostr:{event}\nnostr:{event}");
-        let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
-        assert_eq!(
-            content.misskey,
-            format!(": \nhttps://coracle.social/{event}")
-        );
-        assert_eq!(media.len(), 0);
-        assert_eq!(
-            q.unwrap().ap_id.strip_prefix(NOTE_ID_PREFIX).unwrap(),
-            Nip19Event::from_bech32(event)
-                .unwrap()
-                .event_id
-                .to_bech32()
-                .unwrap()
-        )
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
+            assert_eq!(
+                content.misskey,
+                format!(": \nhttps://coracle.social/{event}")
+            );
+            assert_eq!(media.len(), 0);
+            assert_eq!(
+                q.unwrap().ap_id.strip_prefix(NOTE_ID_PREFIX).unwrap(),
+                Nip19Event::from_bech32(event)
+                    .unwrap()
+                    .event_id
+                    .to_bech32()
+                    .unwrap()
+            )
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_8() {
+    #[test]
+    fn media_test_8() {
         let s = "aa, https://example.com/#/aaaaa";
-        let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
-        assert_eq!(content.html, "<span>aa, </span><a href=\"https://example.com/#/aaaaa\">https://example.com/#/aaaaa</a>");
-        assert!(media.is_empty());
-        assert!(q.is_none());
+        RT.block_on(async {
+            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            assert_eq!(content.html, "<span>aa, </span><a href=\"https://example.com/#/aaaaa\">https://example.com/#/aaaaa</a>");
+            assert!(media.is_empty());
+            assert!(q.is_none());
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_9() {
+    #[test]
+    fn media_test_9() {
         let event = "nevent1qqsw3p5kfjs3gs78wnqgv6t2xzz37c9sdk3evw6vfnz9a8xdcjzturqzyql76e79w7mv28zmrgvmccr74lnta63a8h9fmeewjua0lzqmjrcfsqgewaehxw309aex2mrp0yhx6mmddaehgu3wwp5ku6e0vgencg";
-        let s = format!(": \nnostr:{event}");
-        let (_, content, _) = media(get_state().await, &s, &mut FxHashMap::default()).await;
-        assert_eq!(content.html, "<span>: <br></span><span><br>RE: </span><a href=\"https://misskey.io/notes/9swud4noy1r50c79\">https://misskey.io/notes/9swud4noy1r50c79</a>");
+        RT.block_on(async {
+            let s = format!(": \nnostr:{event}");
+            let (_, content, _) = media(get_state().await, &s, &mut FxHashMap::default()).await;
+            assert_eq!(content.html, "<span>: <br></span><span><br>RE: </span><a href=\"https://misskey.io/notes/9swud4noy1r50c79\">https://misskey.io/notes/9swud4noy1r50c79</a>");
+        })
     }
 
-    #[tokio::test]
-    async fn media_test_10() {
+    #[test]
+    fn media_test_10() {
         let s = "test🍆\nnostr:nevent1qvzqqqqqqypzqqlr9c8my0tp8z4r83wqs4gga3pec99579l2nu5hwf5tjr0zvk42qyvhwumn8ghj7un9d3shjtnddakk7um5wgh8q6twdvhsz9mhwden5te0wfjkccte9ec8y6tdv9kzumn9wshsqgx0jrrkyheuqneh6xstum5dyt86eea2k9s2ct8e0l2s07lz0vvrcvapatx2";
-        let (_, content, _) = media(get_state().await, s, &mut FxHashMap::default()).await;
-        assert_eq!(content.html, "<span>test🍆<br></span><span><br>RE: </span><a href=\"https://mastodon.social/@pixelfed/112342975213580101\">https://mastodon.social/@pixelfed/112342975213580101</a>");
+        RT.block_on(async {
+            let (_, content, _) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            assert_eq!(content.html, "<span>test🍆<br></span><span><br>RE: </span><a href=\"https://mastodon.social/@pixelfed/112342975213580101\">https://mastodon.social/@pixelfed/112342975213580101</a>");
+        })
     }
 }

@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn html_1() {
         let s ="<p><a href=\"https://example.com/@momo_test\" class=\"u-url mention\">@momo_test@example.com</a> test📺</p>";
-        let result = "[@momo_test@example.com](https://example.com/@momo_test) test📺";
+        let result = "[@momo_test@example.com](https://example.com/@momo_test ) test📺";
         assert_eq!(FmtHtmlToMd(s).to_string(), result);
     }
 

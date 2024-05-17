@@ -48,3 +48,4 @@ percent-encoding = "2.3.1"
 tokio-tungstenite = "0.21.0"
 html-escape = "0.2.13"
 parking_lot = { version = "0.12.2", features = ["deadlock_detection"] }
+tokio-shared-rt = "0.1.0"
