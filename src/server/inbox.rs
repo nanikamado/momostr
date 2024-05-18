@@ -172,7 +172,7 @@ pub async fn http_post_inbox(
                 }
                 backup_nostr_accounts(&state.nostr_account_to_followers).await;
             }
-            ActivityForDeInner::Like { id, .. } => {
+            ActivityForDeInner::Like { id, .. } | ActivityForDeInner::Announce { id, .. } => {
                 debug!("undo like {id}");
                 let object_id = InternalApId::get(Cow::Owned(id.to_string()), actor_id.as_ref())?;
                 if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
