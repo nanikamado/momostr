@@ -1,8 +1,8 @@
 use crate::nostr_to_ap::update_follow_list;
 use crate::server::AppState;
 use crate::{BOT_SEC, NPUB_REG};
+use nostr_lib::types::Filter;
 use nostr_lib::{Event, EventBuilder, Keys, Kind, Marker, Tag};
-use relay_pool::Filter;
 use std::sync::Arc;
 use std::time::Duration;
 

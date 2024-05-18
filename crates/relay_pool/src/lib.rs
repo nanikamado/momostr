@@ -1,11 +1,9 @@
-mod filter;
-
-pub use filter::Filter;
 use futures_util::stream::FuturesUnordered;
 use futures_util::{SinkExt, Stream};
 use id_pool::IdPool;
 use itertools::Itertools;
 use lru::LruCache;
+use nostr::types::Filter;
 use nostr::{Event, JsonUtil, RelayMessage};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Serialize, Serializer};
@@ -254,12 +252,11 @@ pub struct EventWithRelayId<RelayId> {
 
 struct FilterAndSenders<RelayId> {
     filter: Arc<Vec<Filter>>,
-    senders: FxHashMap<u32, Sender<EventWithRelayId<RelayId>>>,
+    sender: Sender<EventWithRelayId<RelayId>>,
 }
 
 struct SubscriptionState<RelayId> {
     sub_id_to_filter_id: HashMap<u32, (FilterId, Arc<FxHashSet<RelayId>>)>,
-    filter_to_id: HashMap<Arc<Vec<Filter>>, FilterId>,
     filter_id_to_senders: FxHashMap<FilterId, FilterAndSenders<RelayId>>,
     id_pool: IdPool,
     broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<RelayId>>,
@@ -294,7 +291,6 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
     fn new(broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<RelayId>>) -> Self {
         Self {
             sub_id_to_filter_id: Default::default(),
-            filter_to_id: Default::default(),
             filter_id_to_senders: Default::default(),
             id_pool: IdPool::new_ranged(0..u32::MAX),
             broadcast_sender,
@@ -320,12 +316,10 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
             if let Ok(id) = subscription_id.to_string().parse() {
                 if let Some(f) = self.filter_id_to_senders.get(&id) {
                     if f.filter.iter().any(|f| f.match_event(&event)) {
-                        for tx in f.senders.values() {
-                            let _ = tx.try_send(EventWithRelayId {
-                                event: event.clone(),
-                                relay_id,
-                            });
-                        }
+                        let _ = f.sender.try_send(EventWithRelayId {
+                            event: event.clone(),
+                            relay_id,
+                        });
                     } else {
                         error!(
                             "recieved event {} did not match the filter {}.",
@@ -348,77 +342,61 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
         tx: Sender<EventWithRelayId<RelayId>>,
         relays: Arc<FxHashSet<RelayId>>,
     ) {
-        let filter_id = *self.filter_to_id.entry(filters.clone()).or_insert_with(|| {
-            let filter_id = FilterId(self.id_pool.request_id().unwrap());
-            let filters: Vec<_> = filters
-                .iter()
-                .filter(|f| {
-                    !f.ids.as_ref().map(|l| l.is_empty()).unwrap_or(false)
-                        && !f.authors.as_ref().map(|l| l.is_empty()).unwrap_or(false)
-                        && !f.kinds.as_ref().map(|l| l.is_empty()).unwrap_or(false)
-                        && f.generic_tags.iter().all(|(_, l)| !l.is_empty())
-                })
-                .cloned()
-                .collect();
-            if !filters.is_empty() {
-                debug!(
-                    "starting connection with id {filter_id}, filters = [{}]",
-                    filters
-                        .iter()
-                        .format_with(", ", |a, f| f(&serde_json::to_string(a).unwrap()))
-                );
-                broadcast(
-                    &self.broadcast_sender,
-                    RelayOp {
-                        msg: ClientMessage::Req {
-                            subscription_id: filter_id,
-                            filters,
-                        },
-                        relays: relays.clone(),
+        let filter_id = FilterId(self.id_pool.request_id().unwrap());
+        let fs: Vec<_> = filters
+            .iter()
+            .filter(|f| {
+                !f.ids.as_ref().map(|l| l.is_empty()).unwrap_or(false)
+                    && !f.authors.as_ref().map(|l| l.is_empty()).unwrap_or(false)
+                    && !f.kinds.as_ref().map(|l| l.is_empty()).unwrap_or(false)
+                    && f.generic_tags.iter().all(|(_, l)| !l.is_empty())
+            })
+            .cloned()
+            .collect();
+        if !fs.is_empty() {
+            debug!(
+                "starting connection with id {filter_id}, filters = [{}]",
+                fs.iter()
+                    .format_with(", ", |a, f| f(&serde_json::to_string(a).unwrap()))
+            );
+            broadcast(
+                &self.broadcast_sender,
+                RelayOp {
+                    msg: ClientMessage::Req {
+                        subscription_id: filter_id,
+                        filters: fs,
                     },
-                )
-            }
-            filter_id
-        });
-        self.sub_id_to_filter_id.insert(id, (filter_id, relays));
-        match self.filter_id_to_senders.entry(filter_id) {
-            std::collections::hash_map::Entry::Occupied(mut e) => {
-                e.get_mut().senders.insert(id, tx);
-            }
-            std::collections::hash_map::Entry::Vacant(e) => {
-                e.insert(FilterAndSenders {
-                    filter: filters,
-                    senders: [(id, tx)].into_iter().collect(),
-                });
-            }
+                    relays: relays.clone(),
+                },
+            )
         }
+        self.sub_id_to_filter_id.insert(id, (filter_id, relays));
+        self.filter_id_to_senders.insert(
+            filter_id,
+            FilterAndSenders {
+                filter: filters,
+                sender: tx,
+            },
+        );
     }
 
     // common code among unsubscribe and filter change
     fn unsub(&mut self, id: u32) -> Sender<EventWithRelayId<RelayId>> {
         let (filter_id, relays) = self.sub_id_to_filter_id.remove(&id).unwrap();
-        let f = self.filter_id_to_senders.get_mut(&filter_id).unwrap();
-        let tx = f.senders.remove(&id).unwrap();
-        if f.senders.is_empty() {
-            let f = self.filter_to_id.remove(&f.filter).unwrap();
-            let filter = self.filter_id_to_senders.remove(&filter_id).unwrap();
-            debug_assert_eq!(filter_id, f);
-            self.id_pool.return_id(filter_id.0).unwrap();
-            broadcast(
-                &self.broadcast_sender,
-                RelayOp {
-                    msg: ClientMessage::Close(filter_id),
-                    relays,
-                },
-            );
-            debug!(
-                "closed the connection of id {filter_id}: {}",
-                serde_json::to_string(&filter.filter).unwrap()
-            );
-        } else {
-            debug!("f.senders = {}", f.senders.keys().format(", "))
-        }
-        tx
+        let f = self.filter_id_to_senders.remove(&filter_id).unwrap();
+        self.id_pool.return_id(filter_id.0).unwrap();
+        broadcast(
+            &self.broadcast_sender,
+            RelayOp {
+                msg: ClientMessage::Close(filter_id),
+                relays,
+            },
+        );
+        debug!(
+            "closed the connection of id {filter_id}: {}",
+            serde_json::to_string(&f.filter).unwrap()
+        );
+        f.sender
     }
 
     async fn handle_filter_op(&mut self, op: FilterOp<RelayId>) {

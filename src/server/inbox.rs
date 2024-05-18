@@ -19,14 +19,13 @@ use nostr_lib::{
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
-use relay_pool::{EventWithRelayId, Filter};
+use relay_pool::EventWithRelayId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::{Borrow, Cow};
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace};
 
@@ -448,15 +447,8 @@ async fn get_event_from_object_id<'a>(
         .db
         .get_event_id_from_ap_id(&InternalApId::get_unchecked(Cow::Owned(url.clone())))
     {
-        let f = Filter {
-            ids: Some([e].into_iter().collect()),
-            ..Default::default()
-        };
-        if let Some(event) = state
-            .get_nostr_event_with_timeout(f, Duration::from_secs(10))
-            .await
-        {
-            return Ok(event);
+        if let Some(e) = state.get_note(e).await {
+            return Ok(e);
         }
     }
     let note: NoteForDe = state

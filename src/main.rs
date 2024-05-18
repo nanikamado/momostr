@@ -15,13 +15,14 @@ use event_deletion_queue::EventDeletionQueue;
 use html_to_md::FmtHtmlToMd;
 use itertools::Itertools;
 use lru::LruCache;
+use nostr_lib::types::Filter;
 use nostr_lib::{
     EventBuilder, FromBech32, JsonUtil, Kind, Metadata, PublicKey, SecretKey, Timestamp,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
-use relay_pool::{Filter, RelayPool};
+use relay_pool::RelayPool;
 use rustc_hash::{FxHashMap, FxHashSet};
 use server::{listen, AppState};
 use std::collections::HashSet;
