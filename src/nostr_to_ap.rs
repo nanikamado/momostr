@@ -15,11 +15,13 @@ use html_escape::{encode_double_quoted_attribute, encode_text};
 use itertools::Itertools;
 use line_span::LineSpanExt;
 use linkify::{Link, LinkFinder, LinkKind};
+use nostr_lib::event::TagStandard;
+use nostr_lib::nips::nip10::Marker;
 use nostr_lib::nips::nip19::{Nip19Event, Nip19Profile};
 use nostr_lib::nips::nip48::Protocol;
 use nostr_lib::types::Metadata;
 use nostr_lib::util::JsonUtil;
-use nostr_lib::{Event, EventId, FromBech32, Marker, PublicKey, Tag, ToBech32};
+use nostr_lib::{Event, EventId, FromBech32, PublicKey, ToBech32};
 use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use regex::{Captures, Regex};
@@ -85,20 +87,20 @@ fn handle_event(
 ) {
     let proxied = event.tags.iter().any(|t| {
         matches!(
-            t,
-            Tag::Proxy {
+            t.as_standardized(),
+            Some(TagStandard::Proxy {
                 protocol: Protocol::ActivityPub,
                 ..
-            }
+            })
         )
     });
     if proxied {
         let to_bot = event.tags.iter().any(|t| {
-            if let Tag::PublicKey {
+            if let Some(TagStandard::PublicKey {
                 public_key,
                 uppercase: false,
                 ..
-            } = t
+            }) = t.as_standardized()
             {
                 public_key == &*BOT_PUB
             } else {
@@ -118,11 +120,11 @@ fn handle_event(
             let mut ps = Vec::new();
             let mut to_bot = false;
             for t in &event.tags {
-                if let Tag::PublicKey {
+                if let Some(TagStandard::PublicKey {
                     public_key,
                     uppercase: false,
                     ..
-                } = t
+                }) = t.as_standardized()
                 {
                     if public_key == &*BOT_PUB {
                         to_bot = true;
@@ -197,18 +199,18 @@ fn handle_event(
             let mut to_ap = false;
             let mut emoji = None;
             for tag in &event.tags {
-                match tag {
-                    Tag::Event { event_id, .. } => {
+                match tag.as_standardized() {
+                    Some(TagStandard::Event { event_id, .. }) => {
                         e = Some(*event_id);
                     }
-                    Tag::PublicKey {
+                    Some(TagStandard::PublicKey {
                         public_key,
                         uppercase: false,
                         ..
-                    } => {
+                    }) => {
                         to_ap |= state.activitypub_accounts.lock().get(public_key).is_some();
                     }
-                    Tag::Emoji { shortcode, url } => {
+                    Some(TagStandard::Emoji { shortcode, url }) => {
                         emoji = Some(NoteTagForSer::Emoji {
                             name: format!(":{shortcode}:"),
                             icon: ImageForSe {
@@ -292,8 +294,8 @@ fn handle_event(
             let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
             let id = event.id.to_bech32().unwrap();
             for tag in &event.tags {
-                match tag {
-                    Tag::Event { event_id, .. } => {
+                match tag.as_standardized() {
+                    Some(TagStandard::Event { event_id, .. }) => {
                         let event_id = *event_id;
                         let state = state.clone();
                         let author = author.clone();
@@ -318,10 +320,10 @@ fn handle_event(
                             }
                         });
                     }
-                    Tag::Proxy {
+                    Some(TagStandard::Proxy {
                         protocol: Protocol::ActivityPub,
                         ..
-                    } => {
+                    }) => {
                         return;
                     }
                     _ => (),
@@ -343,15 +345,15 @@ fn handle_event(
             let mut e = None;
             let mut p = None;
             for tag in &event.tags {
-                match tag {
-                    Tag::Event { event_id, .. } => {
+                match tag.as_standardized() {
+                    Some(TagStandard::Event { event_id, .. }) => {
                         e = Some(*event_id);
                     }
-                    Tag::PublicKey {
+                    Some(TagStandard::PublicKey {
                         public_key,
                         uppercase: false,
                         ..
-                    } => {
+                    }) => {
                         p = state.activitypub_accounts.lock().get(public_key).cloned();
                     }
                     _ => (),
@@ -782,16 +784,15 @@ fn get_ap_id_from_proxied_event(event: &Event) -> Result<String, GetProxiedEvent
     let mut proxy = None;
     let mut from_this_server = false;
     use nostr_lib::nips::nip48::Protocol;
-    use nostr_lib::Tag;
     for tag in &event.tags {
-        match &tag {
-            Tag::Proxy {
+        match tag.as_standardized() {
+            Some(TagStandard::Proxy {
                 id,
                 protocol: Protocol::ActivityPub,
-            } => {
+            }) => {
                 proxy = Some(id.clone());
             }
-            Tag::LabelNamespace(values) => {
+            Some(TagStandard::LabelNamespace(values)) => {
                 from_this_server |= *values == *REVERSE_DNS;
             }
             _ => (),
@@ -835,18 +836,18 @@ impl Note {
         let mut event_has_marker = false;
         let mut tag = Vec::new();
         for t in &event.tags {
-            match t {
-                Tag::Event {
+            match t.as_standardized() {
+                Some(TagStandard::Event {
                     event_id,
                     relay_url: _,
                     marker,
-                } => match marker {
+                }) => match marker {
                     Some(Marker::Reply) => reply = Some(*event_id),
                     Some(Marker::Root) => root = Some(*event_id),
                     Some(_) => event_has_marker = true,
                     None => reply_positional = Some(*event_id),
                 },
-                Tag::Hashtag(hashtag) => {
+                Some(TagStandard::Hashtag(hashtag)) => {
                     let name = format!("#{hashtag}");
                     let href = format!(
                         "https://nostr.band/?q={}",
@@ -854,7 +855,7 @@ impl Note {
                     );
                     tag.push(NoteTagForSer::Hashtag { name, href })
                 }
-                Tag::Emoji { shortcode, url } => tag.push(NoteTagForSer::Emoji {
+                Some(TagStandard::Emoji { shortcode, url }) => tag.push(NoteTagForSer::Emoji {
                     name: format!(":{shortcode}:"),
                     icon: ImageForSe {
                         url: url.to_string(),
@@ -864,11 +865,11 @@ impl Note {
                         utf8_percent_encode(&url.to_string(), NON_ALPHANUMERIC)
                     ),
                 }),
-                Tag::PublicKey {
+                Some(TagStandard::PublicKey {
                     public_key,
                     uppercase: false,
                     ..
-                } => {
+                }) => {
                     if author_opt_outed
                         && state.activitypub_accounts.lock().contains_key(public_key)
                     {
@@ -993,11 +994,11 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
         .tags
         .iter()
         .filter_map(|t| {
-            if let nostr_lib::Tag::PublicKey {
+            if let Some(TagStandard::PublicKey {
                 public_key,
                 uppercase: false,
                 ..
-            } = t
+            }) = t.as_standardized()
             {
                 state.activitypub_accounts.lock().get(public_key).cloned()
             } else {

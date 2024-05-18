@@ -8,7 +8,8 @@ use crate::{
 use axum::http::{Method, Request, Uri};
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use nostr_lib::{EventBuilder, JsonUtil, Metadata, RelayMetadata, UncheckedUrl};
+use nostr_lib::nips::nip65::RelayMetadata;
+use nostr_lib::{EventBuilder, JsonUtil, Metadata};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::header::HeaderMap;
@@ -579,20 +580,26 @@ impl AppState {
                 event_tag(
                     actor.id.clone(),
                     actor.tag.iter().filter_map(|t| match t {
-                        NoteTagForDe::Emoji { name, icon } => Some(nostr_lib::Tag::Emoji {
-                            shortcode: name.trim_matches(':').to_string(),
-                            url: icon.url.clone().into(),
-                        }),
-                        NoteTagForDe::Hashtag { name } => Some(nostr_lib::Tag::Hashtag(
-                            name.strip_prefix('#').unwrap_or(name).to_string(),
-                        )),
+                        NoteTagForDe::Emoji { name, icon } => Some(
+                            nostr_lib::TagStandard::Emoji {
+                                shortcode: name.trim_matches(':').to_string(),
+                                url: icon.url.clone().into(),
+                            }
+                            .into(),
+                        ),
+                        NoteTagForDe::Hashtag { name } => Some(
+                            nostr_lib::TagStandard::Hashtag(
+                                name.strip_prefix('#').unwrap_or(name).to_string(),
+                            )
+                            .into(),
+                        ),
                         _ => None,
                     }),
                 ),
             )
             .to_event(&key)
             .unwrap();
-            static MAIL_BOX: Lazy<Vec<(UncheckedUrl, Option<RelayMetadata>)>> = Lazy::new(|| {
+            static MAIL_BOX: Lazy<Vec<(Url, Option<RelayMetadata>)>> = Lazy::new(|| {
                 OUTBOX_RELAYS
                     .iter()
                     .map(|r| {
@@ -601,13 +608,13 @@ impl AppState {
                         } else {
                             Some(RelayMetadata::Write)
                         };
-                        (UncheckedUrl::new(r.to_string()), marker)
+                        (Url::parse(r).unwrap(), marker)
                     })
                     .chain(INBOX_RELAYS.iter().filter_map(|r| {
                         if OUTBOX_RELAYS.contains(r) {
                             None
                         } else {
-                            Some((UncheckedUrl::new(r.to_string()), Some(RelayMetadata::Read)))
+                            Some((Url::parse(r).unwrap(), Some(RelayMetadata::Read)))
                         }
                     }))
                     .collect()

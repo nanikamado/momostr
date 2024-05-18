@@ -1,8 +1,10 @@
 use crate::nostr_to_ap::update_follow_list;
 use crate::server::AppState;
 use crate::{BOT_SEC, NPUB_REG};
+use nostr_lib::event::TagStandard;
+use nostr_lib::nips::nip10::Marker;
 use nostr_lib::types::Filter;
-use nostr_lib::{Event, EventBuilder, Keys, Kind, Marker, Tag};
+use nostr_lib::{Event, EventBuilder, Keys, Kind, Tag};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -101,32 +103,41 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     let mut tags = vec![Tag::public_key(event.author())];
     let mut root = None;
     for t in &event.tags {
-        if let Tag::Event {
+        if let Some(TagStandard::Event {
             event_id,
             relay_url: _,
             marker: Some(Marker::Root),
-        } = t
+        }) = t.as_standardized()
         {
             root = Some(event_id);
         }
     }
     if let Some(e) = root {
-        tags.push(Tag::Event {
-            event_id: *e,
-            relay_url: None,
-            marker: Some(Marker::Root),
-        });
-        tags.push(Tag::Event {
-            event_id: event.id,
-            relay_url: None,
-            marker: Some(Marker::Reply),
-        });
+        tags.push(
+            TagStandard::Event {
+                event_id: *e,
+                relay_url: None,
+                marker: Some(Marker::Root),
+            }
+            .into(),
+        );
+        tags.push(
+            TagStandard::Event {
+                event_id: event.id,
+                relay_url: None,
+                marker: Some(Marker::Reply),
+            }
+            .into(),
+        );
     } else {
-        tags.push(Tag::Event {
-            event_id: event.id,
-            relay_url: None,
-            marker: Some(Marker::Root),
-        });
+        tags.push(
+            TagStandard::Event {
+                event_id: event.id,
+                relay_url: None,
+                marker: Some(Marker::Root),
+            }
+            .into(),
+        );
     }
     let e = EventBuilder::text_note(command, tags)
         .to_event(&Keys::new(BOT_SEC.clone()))

@@ -13,8 +13,9 @@ use axum::extract::{Request, State};
 use axum::http::uri;
 use axum_macros::debug_handler;
 use itertools::Itertools;
+use nostr_lib::nips::nip10::Marker;
 use nostr_lib::{
-    Event, EventBuilder, FromBech32, Marker, PublicKey, Tag, TagKind, Timestamp, ToBech32,
+    Event, EventBuilder, FromBech32, PublicKey, Tag, TagKind, TagStandard, Timestamp, ToBech32,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -236,7 +237,7 @@ pub async fn http_post_inbox(
                 let emoij = tag.iter().find_map(|t| {
                     if let NoteTagForDe::Emoji { name, icon } = t {
                         if name.as_ref() == content {
-                            Some(Tag::Emoji {
+                            Some(TagStandard::Emoji {
                                 shortcode: content.trim_matches(':').to_string(),
                                 url: icon.url.clone().into(),
                             })
@@ -249,7 +250,7 @@ pub async fn http_post_inbox(
                 });
                 content_converted = content;
                 if let Some(e) = emoij {
-                    tags.push(e);
+                    tags.push(e.into());
                 }
             }
             send_event(
@@ -303,13 +304,14 @@ pub async fn http_post_inbox(
                     event_tag(
                         id.to_string(),
                         [
-                            Tag::Event {
+                            TagStandard::Event {
                                 event_id: event.event.id,
                                 relay_url: Some(
                                     state.relay_url[event.relay_id.0 as usize].clone().into(),
                                 ),
                                 marker: None,
-                            },
+                            }
+                            .into(),
                             Tag::public_key(event.event.pubkey),
                         ],
                     ),
@@ -396,17 +398,20 @@ fn get_npub_from_actor_id(id: &str) -> Option<PublicKey> {
         .and_then(|npub| PublicKey::from_bech32(npub).ok())
 }
 
-pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<Tag> {
+pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<nostr_lib::Tag> {
     let id_for_l = format!("{}.activitypub:{id}", *REVERSE_DNS);
     tags.into_iter()
-        .chain([
-            Tag::Proxy {
-                id,
-                protocol: nostr_lib::nips::nip48::Protocol::ActivityPub,
-            },
-            Tag::LabelNamespace(REVERSE_DNS.to_string()),
-            Tag::Label(vec![id_for_l, REVERSE_DNS.to_string()]),
-        ])
+        .chain(
+            [
+                TagStandard::Proxy {
+                    id,
+                    protocol: nostr_lib::nips::nip48::Protocol::ActivityPub,
+                },
+                TagStandard::LabelNamespace(REVERSE_DNS.to_string()),
+                TagStandard::Label(vec![id_for_l, REVERSE_DNS.to_string()]),
+            ]
+            .map(|t| t.into()),
+        )
         .collect()
 }
 
@@ -537,32 +542,32 @@ async fn get_event_from_note<'a>(
         ]
         .contains(&a.as_str())
     });
-    let mut tags = FxHashSet::default();
+    let mut tags: FxHashSet<nostr_lib::Tag> = FxHashSet::default();
     if let Some(r) = note.summary {
         if !r.is_empty() {
-            tags.insert(Tag::ContentWarning { reason: Some(r) });
+            tags.insert(TagStandard::ContentWarning { reason: Some(r) }.into());
         }
     } else if note.sensitive.unwrap_or(false) {
-        tags.insert(Tag::ContentWarning { reason: None });
+        tags.insert(TagStandard::ContentWarning { reason: None }.into());
     }
     let is_reply = note.in_reply_to.is_some();
     if let Some(r) = note.in_reply_to {
         let e = get_event_from_object_id(state, r, Cow::Borrowed(visited.borrow())).await?;
         let mut root = None;
         for t in &e.event.tags {
-            match t {
-                Tag::PublicKey {
+            match t.as_standardized() {
+                Some(TagStandard::PublicKey {
                     public_key,
                     uppercase: false,
                     ..
-                } => {
+                }) => {
                     tags.insert(Tag::public_key(*public_key));
                 }
-                Tag::Event {
+                Some(TagStandard::Event {
                     event_id,
                     relay_url: _,
                     marker: Some(Marker::Root),
-                } => {
+                }) => {
                     root = Some(*event_id);
                 }
                 _ => (),
@@ -570,22 +575,31 @@ async fn get_event_from_note<'a>(
         }
         tags.insert(Tag::public_key(e.event.pubkey));
         if let Some(root) = root {
-            tags.insert(Tag::Event {
-                event_id: root,
-                relay_url: None,
-                marker: Some(nostr_lib::Marker::Root),
-            });
-            tags.insert(Tag::Event {
-                event_id: e.event.id,
-                relay_url: None,
-                marker: Some(nostr_lib::Marker::Reply),
-            });
+            tags.insert(
+                TagStandard::Event {
+                    event_id: root,
+                    relay_url: None,
+                    marker: Some(Marker::Root),
+                }
+                .into(),
+            );
+            tags.insert(
+                TagStandard::Event {
+                    event_id: e.event.id,
+                    relay_url: None,
+                    marker: Some(Marker::Reply),
+                }
+                .into(),
+            );
         } else {
-            tags.insert(Tag::Event {
-                event_id: e.event.id,
-                relay_url: None,
-                marker: Some(nostr_lib::Marker::Root),
-            });
+            tags.insert(
+                TagStandard::Event {
+                    event_id: e.event.id,
+                    relay_url: None,
+                    marker: Some(Marker::Root),
+                }
+                .into(),
+            );
         }
     }
     for t in &note.tag {
@@ -598,15 +612,18 @@ async fn get_event_from_note<'a>(
                 }
             }
             NoteTagForDe::Emoji { name, icon } => {
-                tags.insert(Tag::Emoji {
-                    shortcode: name.trim_matches(':').to_string(),
-                    url: icon.url.clone().into(),
-                });
+                tags.insert(
+                    TagStandard::Emoji {
+                        shortcode: name.trim_matches(':').to_string(),
+                        url: icon.url.clone().into(),
+                    }
+                    .into(),
+                );
             }
             NoteTagForDe::Hashtag { name } => {
-                tags.insert(Tag::Hashtag(
-                    name.strip_prefix('#').unwrap_or(name).to_string(),
-                ));
+                tags.insert(
+                    TagStandard::Hashtag(name.strip_prefix('#').unwrap_or(name).to_string()).into(),
+                );
             }
             _ => (),
         }
@@ -678,8 +695,8 @@ async fn get_event_from_note<'a>(
         }
         for a in &note.attachment {
             writeln!(&mut content, "{}", a.url).unwrap();
-            tags.insert(Tag::custom(
-                TagKind::Custom("imeta".to_string()),
+            tags.insert(nostr_lib::Tag::custom(
+                TagKind::Custom("imeta".into()),
                 [format!("url {}", a.url)]
                     .into_iter()
                     .chain(a.media_type.as_ref().map(|m| format!("m {m}"))),
@@ -689,16 +706,19 @@ async fn get_event_from_note<'a>(
     };
     if let Some(url) = note.quote_url.or(note.misskey_quote) {
         if let Ok(e) = get_event_from_object_id(state, url.clone(), visited).await {
-            tags.insert(Tag::Generic(
-                TagKind::Custom("q".to_string()),
+            tags.insert(nostr_lib::Tag::custom(
+                TagKind::Custom("q".into()),
                 vec![e.event.id.to_string()],
             ));
-            tags.insert(Tag::PublicKey {
-                public_key: e.event.author(),
-                relay_url: None,
-                alias: None,
-                uppercase: false,
-            });
+            tags.insert(
+                TagStandard::PublicKey {
+                    public_key: e.event.author(),
+                    relay_url: None,
+                    alias: None,
+                    uppercase: false,
+                }
+                .into(),
+            );
             if !content.ends_with('\n') && !content.is_empty() {
                 content.to_mut().push('\n');
             }
@@ -713,10 +733,13 @@ async fn get_event_from_note<'a>(
         }
     }
     if let Some(url) = note.url.url {
-        tags.insert(Tag::Proxy {
-            id: url,
-            protocol: nostr_lib::nips::nip48::Protocol::Web,
-        });
+        tags.insert(
+            TagStandard::Proxy {
+                id: url,
+                protocol: nostr_lib::nips::nip48::Protocol::Web,
+            }
+            .into(),
+        );
     }
     if is_private_note {
         info!("skipped private note as it's not supported");
@@ -724,11 +747,11 @@ async fn get_event_from_note<'a>(
     }
     if state.db.is_stopped_ap(&actor.id) {
         let has_mention_to_nostr = tags.iter().any(|t| {
-            if let Tag::PublicKey {
+            if let Some(TagStandard::PublicKey {
                 public_key,
                 uppercase: false,
                 ..
-            } = t
+            }) = t.as_standardized()
             {
                 !state.activitypub_accounts.lock().contains_key(public_key)
             } else {

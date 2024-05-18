@@ -3,7 +3,7 @@ use crate::server::AppState;
 use crate::RelayId;
 use cached::Cached;
 use futures_util::StreamExt;
-use nostr_lib::event::Event;
+use nostr_lib::event::{Event, TagStandard};
 use nostr_lib::types::Filter;
 use nostr_lib::{EventBuilder, EventId, JsonUtil, Kind, Metadata, PublicKey, SecretKey};
 use relay_pool::EventWithRelayId;
@@ -55,13 +55,22 @@ pub async fn get_nostr_user_data_without_cache(
         .ok()
         .flatten()
         .ok_or(Error::NotFound)?;
-    let n = if let Some(id) = e.event.tags.iter().find_map(|tag| match tag {
-        nostr_lib::Tag::Proxy {
+    let n = if let Some(id) = e.event.tags.iter().find_map(|tag| {
+        if let Some(TagStandard::Proxy {
             id,
             protocol: nostr_lib::nips::nip48::Protocol::ActivityPub,
-        } => Some(id),
-        nostr_lib::Tag::Generic(nostr_lib::TagKind::Custom(t), id) if t == "mostr" => id.first(),
-        _ => None,
+        }) = tag.as_standardized()
+        {
+            Some(id.as_str())
+        } else if let nostr_lib::event::TagKind::Custom(t) = tag.kind() {
+            if t == "mostr" {
+                tag.content()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }) {
         NostrUser::Proxied(id.to_string())
     } else {
