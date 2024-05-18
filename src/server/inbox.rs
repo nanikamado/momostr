@@ -13,9 +13,8 @@ use axum::extract::{Request, State};
 use axum::http::uri;
 use axum_macros::debug_handler;
 use itertools::Itertools;
-use nostr_lib::types::{Alphabet, SingleLetterTag};
 use nostr_lib::{
-    Event, EventBuilder, FromBech32, Kind, Marker, PublicKey, Tag, TagKind, Timestamp, ToBech32,
+    Event, EventBuilder, FromBech32, Marker, PublicKey, Tag, TagKind, Timestamp, ToBech32,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -126,10 +125,7 @@ pub async fn http_post_inbox(
                 backup_nostr_accounts(&state.nostr_account_to_followers).await;
             });
         }
-        ActivityForDeInner::Undo {
-            object,
-            id: undo_id,
-        } => match *object.activity_inner {
+        ActivityForDeInner::Undo { object } => match *object.activity_inner {
             ActivityForDeInner::Follow { object, .. } => {
                 info!("{actor_id} unfollowed {object}");
                 let object = get_npub_from_actor_id(object.as_ref())
@@ -176,68 +172,23 @@ pub async fn http_post_inbox(
                 }
                 backup_nostr_accounts(&state.nostr_account_to_followers).await;
             }
-            ActivityForDeInner::Like { object, id, .. } => {
-                let note = get_note_from_this_server(&state, object.as_ref())
-                    .await
-                    .ok_or_else(|| Error::BadRequest(Some("object not found".to_string())))?;
-                let f = Filter {
-                    authors: Some([actor.npub].into_iter().collect()),
-                    kinds: Some([Kind::Reaction].into_iter().collect()),
-                    until: Some(Timestamp::now()),
-                    limit: Some(1),
-                    generic_tags: [
-                        (
-                            SingleLetterTag::lowercase(Alphabet::L),
-                            [nostr_lib::GenericTagValue::String(format!(
-                                "{}.activitypub:{id}",
-                                *REVERSE_DNS
-                            ))]
-                            .into_iter()
-                            .collect(),
-                        ),
-                        (
-                            SingleLetterTag::lowercase(Alphabet::E),
-                            [nostr_lib::GenericTagValue::EventId(note.id)]
-                                .into_iter()
-                                .collect(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                    ..Default::default()
-                };
-                let nsec = actor.nsec.clone();
-                let undo_id = undo_id.to_string();
-                let ap_id = InternalApId::get(id, actor_id.as_ref())?.into_owned();
-                tokio::spawn(async move {
-                    match state
-                        .get_nostr_event_with_timeout(f, Duration::from_secs(10))
-                        .await
-                    {
-                        Some(EventWithRelayId {
-                            event: reaction_event,
-                            ..
-                        }) => {
-                            send_event(
-                                &state,
-                                Arc::new(
-                                    EventBuilder::new(
-                                        nostr_lib::Kind::EventDeletion,
-                                        "",
-                                        event_tag(undo_id, [Tag::event(reaction_event.id)]),
-                                    )
-                                    .to_event(&nostr_lib::Keys::new(nsec))
+            ActivityForDeInner::Like { id, .. } => {
+                debug!("undo like {id}");
+                let object_id = InternalApId::get(Cow::Owned(id.to_string()), actor_id.as_ref())?;
+                if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
+                    let nsec = actor.nsec.clone();
+                    tokio::spawn(async move {
+                        state
+                            .nostr_send(Arc::new(
+                                EventBuilder::delete([e])
+                                    .to_event(&nostr_lib::Keys::new(nsec.clone()))
                                     .unwrap(),
-                                ),
-                                ap_id,
-                            )
+                            ))
                             .await;
-                        }
-                        _ => {
-                            info!("tried to delete a reaction event but could not find it");
-                        }
-                    }
-                });
+                    });
+                } else {
+                    info!("tried to delete a event but could not find it");
+                }
             }
             _ => {
                 info!("undo of this activity is not supported: {object:?}");

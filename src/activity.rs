@@ -335,7 +335,6 @@ pub enum ActivityForDeInner<'a> {
     Undo {
         #[serde(borrow)]
         object: ActivityForDe<'a>,
-        id: Cow<'a, str>,
     },
     Like {
         object: Cow<'a, str>,
