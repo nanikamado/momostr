@@ -50,7 +50,6 @@ pub struct AppState {
     pub nostr: RelayPool<RelayId>,
     pub nostr_account_to_followers: Mutex<FxHashMap<nostr_lib::PublicKey, Arc<HashSet<String>>>>,
     pub nostr_account_to_followers_rev: Mutex<FxHashMap<String, FxHashSet<nostr_lib::PublicKey>>>,
-    pub activitypub_accounts: Mutex<FxHashMap<nostr_lib::PublicKey, Arc<String>>>,
     pub http_client: reqwest::Client,
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,

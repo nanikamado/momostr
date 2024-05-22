@@ -753,7 +753,7 @@ async fn get_event_from_note<'a>(
                 ..
             }) = t.as_standardized()
             {
-                !state.activitypub_accounts.lock().contains_key(public_key)
+                state.db.get_ap_id_of_npub(public_key).is_none()
             } else {
                 false
             }

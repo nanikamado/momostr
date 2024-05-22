@@ -11,11 +11,7 @@ use std::time::Duration;
 pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     let command = NPUB_REG.replace_all(&event.content, "");
     let command = command.trim().to_lowercase();
-    let l = state
-        .activitypub_accounts
-        .lock()
-        .get(event.author_ref())
-        .cloned();
+    let l = state.db.get_ap_id_of_npub(event.author_ref());
     let command = if let Some(id) = l {
         let stopped = state.db.is_stopped_ap(&id);
         if command == "stop my mirror" {

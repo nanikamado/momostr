@@ -94,7 +94,7 @@ async fn main() {
         .init();
 
     assert!(SECRET_KEY.len() > 10);
-
+    let db = Db::new().await;
     let nostr_account_to_followers: FxHashMap<PublicKey, Arc<HashSet<String>>> =
         if let Ok(s) = tokio::fs::read_to_string("nostr_accounts.json").await {
             serde_json::from_str(&s).unwrap()
@@ -110,13 +110,10 @@ async fn main() {
                 .or_default()
                 .insert(*key);
         }
+        db.insert_followers_of_nostr(*key, value.clone());
+        let v = db.get_followers_of_nostr(key);
+        assert_eq!(value, &v.unwrap());
     }
-    let activitypub_accounts: FxHashMap<PublicKey, Arc<String>> =
-        if let Ok(s) = tokio::fs::read_to_string("fediverse_accounts.json").await {
-            serde_json::from_str(&s).unwrap()
-        } else {
-            FxHashMap::default()
-        };
     let relays = RELAYS
         .iter()
         .map(|l| url::Url::parse(l).unwrap())
@@ -172,12 +169,11 @@ async fn main() {
         relay_url: relays,
         nostr_account_to_followers: Mutex::new(nostr_account_to_followers),
         nostr_account_to_followers_rev: Mutex::new(nostr_account_to_followers_rev),
-        activitypub_accounts: Mutex::new(activitypub_accounts),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(100).unwrap())),
         nostr_user_cache: Mutex::new(TimedSizedCache::with_size_and_lifespan(1_000, 60 * 10)),
-        db: Db::new().await,
+        db,
         main_relays,
         metadata_relays: Arc::new(metadata_relays),
         event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),

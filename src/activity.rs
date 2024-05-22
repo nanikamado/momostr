@@ -22,10 +22,8 @@ use sha3::Sha3_256;
 use sigh::alg::RsaSha256;
 use sigh::{Key, SigningConfig};
 use std::borrow::Cow;
-use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 use url::Url;
 
@@ -628,22 +626,10 @@ impl AppState {
                 self.nostr
                     .send(Arc::new(kind10002), self.metadata_relays.clone()),
             );
-            let new = {
-                if let Entry::Vacant(e) = self.activitypub_accounts.lock().entry(actor.npub) {
-                    e.insert(actor.id.to_string().into());
-                    true
-                } else {
-                    false
-                }
-            };
+            let new = self.db.get_ap_id_of_npub(&actor.npub).is_none();
             if new {
-                let s = { serde_json::to_vec(&*self.activitypub_accounts.lock()).unwrap() };
-                tokio::fs::File::create("fediverse_accounts.json")
-                    .await
-                    .unwrap()
-                    .write_all(&s)
-                    .await
-                    .unwrap()
+                self.db
+                    .insert_ap_id_of_npub(&actor.npub, Arc::new(actor.id.clone()));
             }
             Ok(new)
         } else {

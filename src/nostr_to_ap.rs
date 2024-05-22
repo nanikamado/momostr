@@ -129,7 +129,7 @@ fn handle_event(
                     if public_key == &*BOT_PUB {
                         to_bot = true;
                     }
-                    if let Some(a) = state.activitypub_accounts.lock().get(public_key) {
+                    if let Some(a) = state.db.get_ap_id_of_npub(public_key) {
                         ps.push(a.clone());
                     }
                 }
@@ -208,7 +208,7 @@ fn handle_event(
                         uppercase: false,
                         ..
                     }) => {
-                        to_ap |= state.activitypub_accounts.lock().get(public_key).is_some();
+                        to_ap |= state.db.get_ap_id_of_npub(public_key).is_some();
                     }
                     Some(TagStandard::Emoji { shortcode, url }) => {
                         emoji = Some(NoteTagForSer::Emoji {
@@ -252,7 +252,7 @@ fn handle_event(
                     .get(reacted_p)
                     .cloned();
                 let tmp: String;
-                let p = state.activitypub_accounts.lock().get(reacted_p).cloned();
+                let p = state.db.get_ap_id_of_npub(reacted_p);
                 let activity = ReactionForSer {
                     actor: &author,
                     id: &event.id.to_bech32().unwrap(),
@@ -354,7 +354,7 @@ fn handle_event(
                         uppercase: false,
                         ..
                     }) => {
-                        p = state.activitypub_accounts.lock().get(public_key).cloned();
+                        p = state.db.get_ap_id_of_npub(public_key);
                     }
                     _ => (),
                 }
@@ -870,9 +870,7 @@ impl Note {
                     uppercase: false,
                     ..
                 }) => {
-                    if author_opt_outed
-                        && state.activitypub_accounts.lock().contains_key(public_key)
-                    {
+                    if author_opt_outed && state.db.get_ap_id_of_npub(public_key).is_some() {
                         // TODO: notify the author that their mention doesn't mirrored
                         return None;
                     }
@@ -1000,7 +998,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                 ..
             }) = t.as_standardized()
             {
-                state.activitypub_accounts.lock().get(public_key).cloned()
+                state.db.get_ap_id_of_npub(public_key)
             } else {
                 None
             }
@@ -1147,7 +1145,6 @@ mod tests {
                     relay_url: relays,
                     nostr_account_to_followers: Default::default(),
                     nostr_account_to_followers_rev: Default::default(),
-                    activitypub_accounts: Default::default(),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
                     actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),

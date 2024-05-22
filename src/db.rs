@@ -4,6 +4,7 @@ use nostr_lib::key::PublicKey;
 use parking_lot::Mutex;
 use rocksdb::DB as Rocks;
 use rustc_hash::FxHashSet;
+use std::collections::HashSet;
 use std::fs::create_dir_all;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{self, AtomicU32};
@@ -24,6 +25,10 @@ pub struct Db {
     stopped_ap: Rocks,
     stopped_ap_on_memory: Mutex<FxHashSet<String>>,
     event_counter: AtomicU32,
+    nostr_to_followers: Rocks,
+    nostr_to_followers_cache: Mutex<LruCache<nostr_lib::PublicKey, Arc<HashSet<String>>>>,
+    npub_to_ap_id: Rocks,
+    npub_to_ap_id_cache: Mutex<LruCache<nostr_lib::PublicKey, Option<Arc<String>>>>,
 }
 
 impl Db {
@@ -64,6 +69,9 @@ impl Db {
                 .map(|a| String::from_utf8(a.unwrap().0.to_vec()).unwrap())
                 .collect(),
         );
+        let nostr_to_followers =
+            Rocks::open(&opts, config_dir.join("nostr_to_followers.rocksdb")).unwrap();
+        let npub_to_ap_id = Rocks::open(&opts, config_dir.join("npub_to_ap_id.rocksdb")).unwrap();
         Self {
             inbox_to_id,
             id_to_inbox,
@@ -78,6 +86,10 @@ impl Db {
             stopped_npub_on_memory,
             stopped_ap,
             stopped_ap_on_memory,
+            nostr_to_followers,
+            nostr_to_followers_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
+            npub_to_ap_id,
+            npub_to_ap_id_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
         }
     }
 
@@ -151,6 +163,27 @@ impl Db {
         self.nostr_to_followee_cache.lock().put(p, followee);
     }
 
+    pub fn get_followers_of_nostr(&self, p: &nostr_lib::PublicKey) -> Option<Arc<HashSet<String>>> {
+        if let Some(l) = self.nostr_to_followers_cache.lock().get(p) {
+            return Some(l.clone());
+        }
+        self.nostr_to_followers
+            .get_pinned(p.to_bytes())
+            .unwrap()
+            .map(|a| rmp_serde::from_slice(&a).unwrap())
+    }
+
+    pub fn insert_followers_of_nostr(
+        &self,
+        p: nostr_lib::PublicKey,
+        followee: Arc<HashSet<String>>,
+    ) {
+        self.nostr_to_followers
+            .put(p.to_bytes(), rmp_serde::to_vec(&followee).unwrap())
+            .unwrap();
+        self.nostr_to_followers_cache.lock().put(p, followee);
+    }
+
     pub fn insert_ap_id_to_event_id(
         &self,
         ap_id: InternalApId<'static>,
@@ -180,6 +213,28 @@ impl Db {
         self.ap_id_to_event_id_cache
             .lock()
             .put(ap_id.clone().into_owned(), r);
+        r
+    }
+
+    pub fn insert_ap_id_of_npub(&self, p: &PublicKey, ap_id: Arc<String>) {
+        self.npub_to_ap_id
+            .put(p.to_bytes(), ap_id.as_bytes())
+            .unwrap();
+        self.npub_to_ap_id_cache.lock().push(*p, Some(ap_id));
+    }
+
+    pub fn get_ap_id_of_npub(&self, p: &PublicKey) -> Option<Arc<String>> {
+        {
+            if let Some(a) = self.npub_to_ap_id_cache.lock().get(p) {
+                return a.clone();
+            }
+        }
+        let r = self
+            .npub_to_ap_id
+            .get(p.to_bytes())
+            .unwrap()
+            .map(|a| Arc::new(String::from_utf8(a).unwrap()));
+        self.npub_to_ap_id_cache.lock().put(*p, r.clone());
         r
     }
 
