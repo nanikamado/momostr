@@ -95,7 +95,7 @@ impl Serialize for Note {
             &[
                 LinkForSer {
                     rel: None,
-                    href: &format_args!("https://coracle.social/notes/{}", self.nevent),
+                    href: &format_args!("https://coracle.social/{}", self.nevent),
                 },
                 LinkForSer {
                     rel: Some("canonical"),
