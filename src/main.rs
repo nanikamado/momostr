@@ -3,6 +3,7 @@ mod bot;
 mod db;
 mod error;
 mod event_deletion_queue;
+mod memory_debug;
 mod nostr;
 mod nostr_to_ap;
 mod rsa_keys;

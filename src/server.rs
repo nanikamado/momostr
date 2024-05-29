@@ -72,6 +72,7 @@ pub async fn listen(state: Arc<AppState>) -> Result<(), Error> {
         .route("/.well-known/webfinger", get(webfinger))
         .route("/.well-known/nostr.json", get(nostr_json))
         .route("/.well-known/nodeinfo", get(well_known_nodeinfo))
+        .route("/memory", get(memory))
         .fallback(handler_404)
         .with_state(state);
 
@@ -516,4 +517,18 @@ pub async fn http_get_note(
 async fn handler_404(request: Request) -> Error {
     info!("handler_404: {}", request.uri());
     Error::NotFound
+}
+
+#[cfg(feature = "memory_debug")]
+async fn memory() -> String {
+    crate::memory_debug::GLOBAL_ALLOC.dump()
+}
+
+#[cfg(not(feature = "memory_debug"))]
+async fn memory() -> &'static str {
+    // To enable memory debug page, compile with the following options:
+    // ```
+    // env CARGO_PROFILE_RELEASE_DEBUG=true cargo b -r --features=memory_debug
+    // ```
+    "not supported"
 }
