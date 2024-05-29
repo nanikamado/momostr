@@ -171,7 +171,7 @@ async fn main() {
         nostr_account_to_followers_rev: Mutex::new(nostr_account_to_followers_rev),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
-        actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(100).unwrap())),
+        actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         nostr_user_cache: Mutex::new(TimedSizedCache::with_size_and_lifespan(1_000, 60 * 10)),
         db,
         main_relays,
