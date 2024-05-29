@@ -7,6 +7,7 @@ use rustc_hash::FxHashSet;
 use std::collections::HashSet;
 use std::fs::create_dir_all;
 use std::num::NonZeroUsize;
+use std::path::Path;
 use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 
@@ -33,27 +34,23 @@ pub struct Db {
 
 impl Db {
     pub async fn new() -> Self {
-        let config_dir = dirs::config_dir().unwrap().join("momostr");
-        create_dir_all(&config_dir).unwrap();
+        let config_dir = Path::new(env!("DB"));
+        create_dir_all(config_dir).unwrap();
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
         opts.set_max_log_file_size(0);
-        let inbox_to_id =
-            Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_INBOX_TO_ID"))).unwrap();
-        let id_to_inbox =
-            Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_ID_TO_INBOX"))).unwrap();
+        let inbox_to_id = Rocks::open(&opts, config_dir.join("inbox_to_id.rocksdb")).unwrap();
+        let id_to_inbox = Rocks::open(&opts, config_dir.join("id_to_inbox.rocksdb")).unwrap();
         let inbox_to_id_len = inbox_to_id.iterator(rocksdb::IteratorMode::Start).count();
         let id_to_inbox_len = id_to_inbox.iterator(rocksdb::IteratorMode::Start).count();
         assert_eq!(inbox_to_id_len, id_to_inbox_len);
         let event_id_to_inboxes =
-            Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_EVENT_ID_TO_INBOXES"))).unwrap();
+            Rocks::open(&opts, config_dir.join("event_id_to_inboxes.rocksdb")).unwrap();
         let event_id_to_inboxes_len = event_id_to_inboxes
             .iterator(rocksdb::IteratorMode::Start)
             .count();
-        let nostr_to_followee =
-            Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_NOSTR_TO_FOLLOWEE"))).unwrap();
-        let stopped_npub =
-            Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_STOPPED_NPUB"))).unwrap();
+        let nostr_to_followee = Rocks::open(&opts, config_dir.join("follow_list.rocksdb")).unwrap();
+        let stopped_npub = Rocks::open(&opts, config_dir.join("stopped_npub.rocksdb")).unwrap();
         let stopped_npub_on_memory = Mutex::new(
             stopped_npub
                 .iterator(rocksdb::IteratorMode::Start)
@@ -61,8 +58,8 @@ impl Db {
                 .collect(),
         );
         let ap_id_to_event_id =
-            Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_AP_ID_TO_EVENT_ID"))).unwrap();
-        let stopped_ap = Rocks::open(&opts, config_dir.join(env!("ROCKS_DB_STOPPED_AP"))).unwrap();
+            Rocks::open(&opts, config_dir.join("ap_id_to_event_id.rocksdb")).unwrap();
+        let stopped_ap = Rocks::open(&opts, config_dir.join("stopped_ap.rocksdb")).unwrap();
         let stopped_ap_on_memory = Mutex::new(
             stopped_ap
                 .iterator(rocksdb::IteratorMode::Start)
