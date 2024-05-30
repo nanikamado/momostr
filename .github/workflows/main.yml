@@ -35,13 +35,7 @@ env:
     f+HgE4clUe+0WqqTkVoa4SZkAzircyvM2gq2yiTLciLQlP49UpxO02qpR9NR4oPQ
     YU/ldBogehl1EPk5XEPkqAU=
     -----END PRIVATE KEY-----
-  ROCKS_DB_INBOX_TO_ID: inbox_to_id.rocksdb
-  ROCKS_DB_ID_TO_INBOX: id_to_inbox.rocksdb
-  ROCKS_DB_EVENT_ID_TO_INBOXES: event_id_to_inboxes.rocksdb
-  ROCKS_DB_NOSTR_TO_FOLLOWEE: follow_list.rocksdb
-  ROCKS_DB_STOPPED_NPUB: stopped_npub.rocksdb
-  ROCKS_DB_STOPPED_AP: stopped_ap.rocksdb
-  ROCKS_DB_AP_ID_TO_EVENT_ID: ap_id_to_event_id.rocksdb
+  DB: /momostr
   BOT_NSEC: nsec1h5zs3rde7w3q269cvgsrfqp3xlw658c5wsvk6pwekvr524sktqjq7grskw
   AP_RELAYS: ""
   METADATA_RELAYS: ""
