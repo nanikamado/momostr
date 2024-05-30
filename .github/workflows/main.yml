@@ -35,7 +35,7 @@ env:
     f+HgE4clUe+0WqqTkVoa4SZkAzircyvM2gq2yiTLciLQlP49UpxO02qpR9NR4oPQ
     YU/ldBogehl1EPk5XEPkqAU=
     -----END PRIVATE KEY-----
-  DB: /momostr
+  DB: ~/momostr
   BOT_NSEC: nsec1h5zs3rde7w3q269cvgsrfqp3xlw658c5wsvk6pwekvr524sktqjq7grskw
   AP_RELAYS: ""
   METADATA_RELAYS: ""

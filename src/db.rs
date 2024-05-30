@@ -36,7 +36,8 @@ pub struct Db {
 
 impl Db {
     pub async fn new() -> Self {
-        let config_dir = Path::new(env!("DB"));
+        let p = shellexpand::tilde(env!("DB"));
+        let config_dir = Path::new(p.as_ref());
         create_dir_all(config_dir).unwrap();
         let mut opts = rocksdb::Options::default();
         opts.create_if_missing(true);
