@@ -109,9 +109,9 @@ You need to be followed by someone on that server for your notes to show up on t
 Non-public posts like DMs or followers-only posts are not supported.
 
 
-## Contact to the admin
+## Source Code
 
-mailto:momostr.pink@gmail.com
+https://github.com/nanikamado/momostr
 ")
 }
 
