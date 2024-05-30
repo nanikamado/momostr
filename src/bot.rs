@@ -64,9 +64,8 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                     update_follow_list(state, e.event).await;
                 }
                 if state
-                    .nostr_account_to_followers
-                    .lock()
-                    .get(npub)
+                    .db
+                    .get_followers_of_nostr(npub)
                     .map_or(false, |a| !a.is_empty())
                 {
                     "Restarted.".to_string()
@@ -78,9 +77,8 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                         .to_string()
                 }
             } else if state
-                .nostr_account_to_followers
-                .lock()
-                .get(npub)
+                .db
+                .get_followers_of_nostr(npub)
                 .map_or(false, |a| !a.is_empty())
             {
                 "Your mirror is not stopped. Your mirror is already working.".to_string()

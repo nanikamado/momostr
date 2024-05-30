@@ -18,16 +18,13 @@ use nostr_lib::{
     Event, EventBuilder, FromBech32, PublicKey, Tag, TagKind, TagStandard, Timestamp, ToBech32,
 };
 use once_cell::sync::Lazy;
-use parking_lot::Mutex;
 use regex::Regex;
 use relay_pool::EventWithRelayId;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::borrow::{Borrow, Cow};
-use std::collections::HashSet;
 use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace};
 
 #[debug_handler]
@@ -67,22 +64,11 @@ pub async fn http_post_inbox(
     match *activity_inner {
         ActivityForDeInner::Follow { object, .. } => {
             info!("{actor_id} followed {object}");
-            let followed = get_npub_from_actor_id(object.as_ref())
+            let followee = get_npub_from_actor_id(object.as_ref())
                 .ok_or_else(|| Error::BadRequest(Some("object not found".to_string())))?;
-            {
-                use std::collections::hash_map::Entry;
-                match state.nostr_account_to_followers.lock().entry(followed) {
-                    Entry::Occupied(mut ls) => {
-                        let ls = ls.get_mut();
-                        let mut ls_cloned = (**ls).clone();
-                        ls_cloned.insert(actor_id.to_string());
-                        *ls = Arc::new(ls_cloned);
-                    }
-                    Entry::Vacant(e) => {
-                        e.insert(Arc::new([actor_id.to_string()].into_iter().collect()));
-                    }
-                }
-            }
+            state
+                .db
+                .insert_follower_of_nostr(followee, actor_id.to_string());
             let object = object.to_string();
             let inbox = actor.inbox.clone();
             let actor_id = actor_id.to_string();
@@ -103,26 +89,24 @@ pub async fn http_post_inbox(
                         )
                         .await;
                 }
-                {
-                    let tags = {
-                        let mut l = state.nostr_account_to_followers_rev.lock();
-                        let l = l.entry(actor_id).or_default();
-                        l.insert(followed);
-                        if l.len() < CONTACT_LIST_LEN_LIMIT {
-                            l.iter()
-                                .map(|p| nostr_lib::Tag::public_key(*p))
-                                .collect_vec()
-                        } else {
-                            Vec::new()
-                        }
-                    };
-                    let l = EventBuilder::new(nostr_lib::Kind::ContactList, "", tags)
-                        .custom_created_at(Timestamp::now())
-                        .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
-                        .unwrap();
-                    state.nostr_send(Arc::new(l)).await;
-                }
-                backup_nostr_accounts(&state.nostr_account_to_followers).await;
+                let tags = {
+                    let l = state.db.insert_followee_of_ap(actor_id, followee);
+                    if l.len() < CONTACT_LIST_LEN_LIMIT {
+                        l.iter()
+                            .map(|p| nostr_lib::Tag::public_key(*p))
+                            .chain(std::iter::once(
+                                TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into(),
+                            ))
+                            .collect_vec()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                let l = EventBuilder::new(nostr_lib::Kind::ContactList, "", tags)
+                    .custom_created_at(Timestamp::now())
+                    .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+                    .unwrap();
+                state.nostr_send(Arc::new(l)).await;
             });
         }
         ActivityForDeInner::Undo { object } => match *object.activity_inner {
@@ -130,47 +114,28 @@ pub async fn http_post_inbox(
                 info!("{actor_id} unfollowed {object}");
                 let object = get_npub_from_actor_id(object.as_ref())
                     .ok_or_else(|| Error::BadRequest(Some("object not found".to_string())))?;
-                {
-                    if let std::collections::hash_map::Entry::Occupied(mut e) =
-                        state.nostr_account_to_followers.lock().entry(object)
-                    {
-                        let is_empty = {
-                            let s = e.get_mut();
-                            let mut s_cloned = (**s).clone();
-                            s_cloned.remove(actor_id.as_ref());
-                            let empty = s.is_empty();
-                            *s = Arc::new(s_cloned);
-                            empty
-                        };
-                        if is_empty {
-                            e.remove();
-                        }
+                let actor_id = actor_id.to_string();
+                state.db.remove_follower_of_nostr(object, &actor_id);
+                let tags = {
+                    let l = state.db.remove_followee_of_ap(actor_id, &object);
+                    if l.len() < CONTACT_LIST_LEN_LIMIT {
+                        Some(
+                            l.iter()
+                                .map(|p| nostr_lib::Tag::public_key(*p))
+                                .collect_vec(),
+                        )
+                    } else {
+                        None
                     }
+                };
+                if let Some(mut tags) = tags {
+                    tags.push(TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into());
+                    let l = EventBuilder::new(nostr_lib::Kind::ContactList, "", tags)
+                        .custom_created_at(Timestamp::now())
+                        .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+                        .unwrap();
+                    state.nostr_send(Arc::new(l)).await;
                 }
-                {
-                    let tags = {
-                        let mut l = state.nostr_account_to_followers_rev.lock();
-                        let l = l.entry(actor_id.to_string()).or_default();
-                        l.remove(&object);
-                        if l.len() < CONTACT_LIST_LEN_LIMIT {
-                            Some(
-                                l.iter()
-                                    .map(|p| nostr_lib::Tag::public_key(*p))
-                                    .collect_vec(),
-                            )
-                        } else {
-                            None
-                        }
-                    };
-                    if let Some(tags) = tags {
-                        let l = EventBuilder::new(nostr_lib::Kind::ContactList, "", tags)
-                            .custom_created_at(Timestamp::now())
-                            .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
-                            .unwrap();
-                        state.nostr_send(Arc::new(l)).await;
-                    }
-                }
-                backup_nostr_accounts(&state.nostr_account_to_followers).await;
             }
             ActivityForDeInner::Like { id, .. } | ActivityForDeInner::Announce { id, .. } => {
                 debug!("undo like {id}");
@@ -413,18 +378,6 @@ pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<nostr_l
             .map(|t| t.into()),
         )
         .collect()
-}
-
-async fn backup_nostr_accounts(
-    nostr_accounts: &Mutex<FxHashMap<nostr_lib::PublicKey, Arc<HashSet<String>>>>,
-) {
-    let s = { serde_json::to_vec(&*nostr_accounts.lock()).unwrap() };
-    tokio::fs::File::create("nostr_accounts.json")
-        .await
-        .unwrap()
-        .write_all(&s)
-        .await
-        .unwrap()
 }
 
 #[tracing::instrument(skip_all)]

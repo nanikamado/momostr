@@ -28,6 +28,8 @@ pub struct Db {
     event_counter: AtomicU32,
     nostr_to_followers: Rocks,
     nostr_to_followers_cache: Mutex<LruCache<nostr_lib::PublicKey, Arc<HashSet<String>>>>,
+    ap_to_followees: Rocks,
+    ap_to_followees_cache: Mutex<LruCache<String, Arc<FxHashSet<nostr_lib::PublicKey>>>>,
     npub_to_ap_id: Rocks,
     npub_to_ap_id_cache: Mutex<LruCache<nostr_lib::PublicKey, Option<Arc<String>>>>,
 }
@@ -68,6 +70,8 @@ impl Db {
         );
         let nostr_to_followers =
             Rocks::open(&opts, config_dir.join("nostr_to_followers.rocksdb")).unwrap();
+        let ap_to_followees =
+            Rocks::open(&opts, config_dir.join("ap_to_followee.rocksdb")).unwrap();
         let npub_to_ap_id = Rocks::open(&opts, config_dir.join("npub_to_ap_id.rocksdb")).unwrap();
         Self {
             inbox_to_id,
@@ -85,6 +89,8 @@ impl Db {
             stopped_ap_on_memory,
             nostr_to_followers,
             nostr_to_followers_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
+            ap_to_followees,
+            ap_to_followees_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
             npub_to_ap_id,
             npub_to_ap_id_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
         }
@@ -170,15 +176,92 @@ impl Db {
             .map(|a| rmp_serde::from_slice(&a).unwrap())
     }
 
-    pub fn insert_followers_of_nostr(
-        &self,
-        p: nostr_lib::PublicKey,
-        followee: Arc<HashSet<String>>,
-    ) {
+    pub fn insert_follower_of_nostr(&self, p: nostr_lib::PublicKey, follower: String) {
+        let mut c = self.nostr_to_followers_cache.lock();
+        let mut followers = c.get(&p).map_or_else(
+            || {
+                self.nostr_to_followers
+                    .get_pinned(p.to_bytes())
+                    .unwrap()
+                    .map(|a| rmp_serde::from_slice(&a).unwrap())
+                    .unwrap_or_default()
+            },
+            |a| (**a).clone(),
+        );
+        followers.insert(follower);
         self.nostr_to_followers
-            .put(p.to_bytes(), rmp_serde::to_vec(&followee).unwrap())
+            .put(p.to_bytes(), rmp_serde::to_vec(&followers).unwrap())
             .unwrap();
-        self.nostr_to_followers_cache.lock().put(p, followee);
+        c.put(p, Arc::new(followers));
+    }
+
+    pub fn remove_follower_of_nostr(&self, p: nostr_lib::PublicKey, follower: &String) {
+        let mut c = self.nostr_to_followers_cache.lock();
+        let mut followers = c.get(&p).map_or_else(
+            || {
+                self.nostr_to_followers
+                    .get_pinned(p.to_bytes())
+                    .unwrap()
+                    .map(|a| rmp_serde::from_slice(&a).unwrap())
+                    .unwrap_or_default()
+            },
+            |a| (**a).clone(),
+        );
+        followers.remove(follower);
+        self.nostr_to_followers
+            .put(p.to_bytes(), rmp_serde::to_vec(&followers).unwrap())
+            .unwrap();
+        c.put(p, Arc::new(followers));
+    }
+
+    pub fn insert_followee_of_ap(
+        &self,
+        p: String,
+        followee: nostr_lib::PublicKey,
+    ) -> Arc<FxHashSet<PublicKey>> {
+        let mut c = self.ap_to_followees_cache.lock();
+        let mut followers = c.get(&p).map_or_else(
+            || {
+                self.ap_to_followees
+                    .get_pinned(p.as_bytes())
+                    .unwrap()
+                    .map(|a| rmp_serde::from_slice(&a).unwrap())
+                    .unwrap_or_default()
+            },
+            |a| (**a).clone(),
+        );
+        followers.insert(followee);
+        self.ap_to_followees
+            .put(p.as_bytes(), rmp_serde::to_vec(&followers).unwrap())
+            .unwrap();
+        let l = Arc::new(followers);
+        c.put(p, l.clone());
+        l
+    }
+
+    pub fn remove_followee_of_ap(
+        &self,
+        p: String,
+        followee: &nostr_lib::PublicKey,
+    ) -> Arc<FxHashSet<PublicKey>> {
+        let mut c = self.ap_to_followees_cache.lock();
+        let mut followers = c.get(&p).map_or_else(
+            || {
+                self.ap_to_followees
+                    .get_pinned(p.as_bytes())
+                    .unwrap()
+                    .map(|a| rmp_serde::from_slice(&a).unwrap())
+                    .unwrap_or_default()
+            },
+            |a| (**a).clone(),
+        );
+        followers.remove(followee);
+        self.ap_to_followees
+            .put(p.as_bytes(), rmp_serde::to_vec(&followers).unwrap())
+            .unwrap();
+        let l = Arc::new(followers);
+        c.put(p, l.clone());
+        l
     }
 
     pub fn insert_ap_id_to_event_id(

@@ -24,9 +24,8 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
 use relay_pool::RelayPool;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use server::{listen, AppState};
-use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -96,25 +95,6 @@ async fn main() {
 
     assert!(SECRET_KEY.len() > 10);
     let db = Db::new().await;
-    let nostr_account_to_followers: FxHashMap<PublicKey, Arc<HashSet<String>>> =
-        if let Ok(s) = tokio::fs::read_to_string("nostr_accounts.json").await {
-            serde_json::from_str(&s).unwrap()
-        } else {
-            FxHashMap::default()
-        };
-    let mut nostr_account_to_followers_rev: FxHashMap<String, FxHashSet<PublicKey>> =
-        Default::default();
-    for (key, value) in nostr_account_to_followers.iter() {
-        for ap in value.iter() {
-            nostr_account_to_followers_rev
-                .entry(ap.clone())
-                .or_default()
-                .insert(*key);
-        }
-        db.insert_followers_of_nostr(*key, value.clone());
-        let v = db.get_followers_of_nostr(key);
-        assert_eq!(value, &v.unwrap());
-    }
     let relays = RELAYS
         .iter()
         .map(|l| url::Url::parse(l).unwrap())
@@ -168,8 +148,6 @@ async fn main() {
     let state = Arc::new(AppState {
         nostr,
         relay_url: relays,
-        nostr_account_to_followers: Mutex::new(nostr_account_to_followers),
-        nostr_account_to_followers_rev: Mutex::new(nostr_account_to_followers_rev),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),

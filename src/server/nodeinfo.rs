@@ -11,7 +11,7 @@ use tracing::info;
 #[debug_handler]
 #[tracing::instrument(skip_all)]
 pub async fn nodeinfo(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, Error> {
     info!("nodeinfo");
     Ok(Json(json!({
@@ -28,11 +28,6 @@ pub async fn nodeinfo(
             "outbound": []
         },
         "openRegistrations": false,
-        "usage": {
-            "users": {
-                "total": state.nostr_account_to_followers.lock().len(),
-            },
-        },
         "metadata": {
             "nodeName": DOMAIN,
             "nodeDescription": "A WIP bridge between Nostr and Fediverse.",

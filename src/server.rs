@@ -36,7 +36,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,8 +47,6 @@ type LazyUser = Arc<tokio::sync::OnceCell<Arc<Result<NostrUser, Error>>>>;
 #[derive(Debug)]
 pub struct AppState {
     pub nostr: RelayPool<RelayId>,
-    pub nostr_account_to_followers: Mutex<FxHashMap<nostr_lib::PublicKey, Arc<HashSet<String>>>>,
-    pub nostr_account_to_followers_rev: Mutex<FxHashMap<String, FxHashSet<nostr_lib::PublicKey>>>,
     pub http_client: reqwest::Client,
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,

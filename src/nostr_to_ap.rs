@@ -144,10 +144,9 @@ fn handle_event(
             let state = state.clone();
             tokio::spawn(async move {
                 let followers = {
-                    let l = state.nostr_account_to_followers.lock();
-                    let followers = l.get(event.author_ref());
+                    let followers = state.db.get_followers_of_nostr(event.author_ref());
                     if !ps.is_empty() || !followers.as_ref().map_or(true, |a| a.is_empty()) {
-                        Some(followers.cloned().unwrap_or_default())
+                        Some(followers.unwrap_or_default())
                     } else {
                         None
                     }
@@ -246,11 +245,7 @@ fn handle_event(
                     }
                 };
                 let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
-                let followers = state
-                    .nostr_account_to_followers
-                    .lock()
-                    .get(reacted_p)
-                    .cloned();
+                let followers = state.db.get_followers_of_nostr(reacted_p);
                 let tmp: String;
                 let p = state.db.get_ap_id_of_npub(reacted_p);
                 let activity = ReactionForSer {
@@ -369,11 +364,7 @@ fn handle_event(
                         }
                     };
                     let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
-                    let followers = state
-                        .nostr_account_to_followers
-                        .lock()
-                        .get(event.author_ref())
-                        .cloned();
+                    let followers = state.db.get_followers_of_nostr(event.author_ref());
                     broadcast_to_actors(
                         &state,
                         AnnounceForSer {
@@ -397,8 +388,7 @@ fn handle_event(
             }
         }
         nostr_lib::Kind::Metadata => {
-            let l = state.nostr_account_to_followers.lock();
-            let followers = l.get(event.author_ref());
+            let followers = state.db.get_followers_of_nostr(event.author_ref());
             if !followers.as_ref().map_or(true, |a| a.is_empty()) {
                 if let Ok(metadata) = Metadata::from_json(&event.content) {
                     debug!("metadata update");
@@ -1143,8 +1133,6 @@ mod tests {
                 Arc::new(AppState {
                     nostr,
                     relay_url: relays,
-                    nostr_account_to_followers: Default::default(),
-                    nostr_account_to_followers_rev: Default::default(),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
                     actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
