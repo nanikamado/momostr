@@ -146,6 +146,10 @@ pub async fn http_post_inbox(
                         state
                             .nostr_send(Arc::new(
                                 EventBuilder::delete([e])
+                                    .add_tags([TagStandard::LabelNamespace(
+                                        REVERSE_DNS.to_string(),
+                                    )
+                                    .into()])
                                     .to_event(&nostr_lib::Keys::new(nsec.clone()))
                                     .unwrap(),
                             ))
@@ -294,7 +298,17 @@ pub async fn http_post_inbox(
                 info!("sending delete request ...");
                 let nsec = actor.nsec.clone();
                 tokio::spawn(async move {
-                    state.delete_event(e, nsec).await;
+                    state
+                        .nostr_send(Arc::new(
+                            EventBuilder::delete([e])
+                                .add_tags([
+                                    TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()
+                                ])
+                                .to_event(&nostr_lib::Keys::new(nsec.clone()))
+                                .unwrap(),
+                        ))
+                        .await;
+                    state.event_deletion_queue.delete(e, nsec)
                 });
             } else {
                 info!("tried to delete a event but could not find it");

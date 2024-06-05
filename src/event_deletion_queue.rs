@@ -1,8 +1,9 @@
 use crate::error::Error;
-use crate::USER_AGENT;
+use crate::{REVERSE_DNS, USER_AGENT};
 use axum::http::HeaderValue;
 use futures_util::{SinkExt, StreamExt};
 use itertools::Itertools;
+use nostr_lib::event::TagStandard;
 use nostr_lib::{Event, EventBuilder, EventId, Keys, SecretKey};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Serialize, Serializer};
@@ -71,6 +72,7 @@ async fn delete_async(
         .map(|(_, (nsec, ids))| {
             serde_json::to_string(&ClientMessage(
                 EventBuilder::delete(ids)
+                    .add_tags([TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()])
                     .to_event(&Keys::new(nsec))
                     .unwrap(),
             ))

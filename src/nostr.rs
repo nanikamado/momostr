@@ -5,7 +5,7 @@ use cached::Cached;
 use futures_util::StreamExt;
 use nostr_lib::event::{Event, TagStandard};
 use nostr_lib::types::Filter;
-use nostr_lib::{EventBuilder, EventId, JsonUtil, Kind, Metadata, PublicKey, SecretKey};
+use nostr_lib::{EventId, JsonUtil, Kind, Metadata, PublicKey};
 use relay_pool::EventWithRelayId;
 use std::sync::Arc;
 use std::time::Duration;
@@ -160,15 +160,5 @@ impl AppState {
             .await
             .ok()
             .flatten()
-    }
-
-    pub async fn delete_event(&self, event_id: EventId, nsec: SecretKey) {
-        self.nostr_send(Arc::new(
-            EventBuilder::delete([event_id])
-                .to_event(&nostr_lib::Keys::new(nsec.clone()))
-                .unwrap(),
-        ))
-        .await;
-        self.event_deletion_queue.delete(event_id, nsec)
     }
 }
