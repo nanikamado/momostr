@@ -4,6 +4,7 @@ use crate::activity::{
     FollowActivity, NoteForDe, NoteTagForDe, HASHTAG_LINK_REGEX,
 };
 use crate::error::Error;
+use crate::util::get_media_type;
 use crate::{
     html_to_text, RelayId, CONTACT_LIST_LEN_LIMIT, DOMAIN, MAIN_RELAY, NOTE_ID_PREFIX, REVERSE_DNS,
     USER_ID_PREFIX,
@@ -662,11 +663,16 @@ async fn get_event_from_note<'a>(
         }
         for a in &note.attachment {
             writeln!(&mut content, "{}", a.url).unwrap();
+            let media_type = if let Some(m) = &a.media_type {
+                Some(format!("m {m}"))
+            } else {
+                get_media_type(&a.url, &state.http_client)
+                    .await
+                    .map(|m| format!("m {m}"))
+            };
             tags.insert(nostr_lib::Tag::custom(
                 TagKind::Custom("imeta".into()),
-                [format!("url {}", a.url)]
-                    .into_iter()
-                    .chain(a.media_type.as_ref().map(|m| format!("m {m}"))),
+                [format!("url {}", a.url)].into_iter().chain(media_type),
             ));
         }
         Cow::Owned(content)

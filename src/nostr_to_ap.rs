@@ -6,6 +6,7 @@ use crate::bot::handle_message_to_bot;
 use crate::error::Error;
 use crate::nostr::{get_nostr_user_data, NostrUser};
 use crate::server::{metadata_to_activity, AppState};
+use crate::util::get_media_type;
 use crate::{
     RelayId, AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG, OUTBOX_RELAYS,
     REVERSE_DNS, USER_ID_PREFIX,
@@ -26,14 +27,12 @@ use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use regex::{Captures, Regex};
 use relay_pool::{EventStream, EventWithRelayId};
-use reqwest::header;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
 
@@ -469,20 +468,6 @@ async fn media<'a>(
             .peekable();
         let mut nevents = NEVENT.captures_iter(l.as_str()).peekable();
         loop {
-            async fn get_media_type(url: &str, client: &reqwest::Client) -> Option<String> {
-                let r = client
-                    .get(url)
-                    .timeout(Duration::from_secs(5))
-                    .send()
-                    .await
-                    .ok()?;
-                let a = r.headers().get(header::CONTENT_TYPE)?.to_str().ok()?;
-                if a.starts_with("image/") || a.starts_with("video/") || a.starts_with("audio/") {
-                    Some(a.to_string())
-                } else {
-                    None
-                }
-            }
             #[allow(clippy::too_many_arguments)]
             async fn link_segment<'a>(
                 link: &Link<'a>,
