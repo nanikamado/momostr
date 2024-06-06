@@ -64,6 +64,7 @@ pub async fn listen(state: Arc<AppState>) -> Result<(), Error> {
         .route("/", get(root))
         .route("/nodeinfo/2.1", get(nodeinfo))
         .route("/inbox", post(http_post_inbox))
+        .route("/empty", get(http_ordered_collection))
         .route("/users/:user", get(http_get_user))
         .route("/notes/:note", get(http_get_note))
         .route("/.well-known/webfinger", get(webfinger))
@@ -245,6 +246,15 @@ pub async fn nostr_json(
     Ok(r)
 }
 
+async fn http_ordered_collection() -> JsonActivity {
+    let a = json!({
+        "type": "OrderedCollection",
+        "totalItems": 0,
+        "orderedItems": []
+    });
+    JsonActivity(serde_json::to_string(&WithContext(a)).unwrap())
+}
+
 const ACTIVITY_STREAMS_URL: &str = "https://www.w3.org/ns/activitystreams";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -336,12 +346,9 @@ impl Serialize for MetadataActivity<'_> {
             }
         }
         m.serialize_entry("inbox", &inbox)?;
-
-        // needed to work with threads.net
-        // m.serialize_entry("outbox", &format_args!("{id}/outbox"))?;
-        // m.serialize_entry("followers", &format_args!("{id}/followers"))?;
-        // m.serialize_entry("following", &format_args!("{id}/following"))?;
-
+        m.serialize_entry("outbox", &format_args!("{HTTPS_DOMAIN}/empty"))?;
+        m.serialize_entry("followers", &format_args!("{HTTPS_DOMAIN}/empty"))?;
+        m.serialize_entry("following", &format_args!("{HTTPS_DOMAIN}/empty"))?;
         m.serialize_entry("endpoints", &json!({ "sharedInbox": inbox }))?;
         m.serialize_entry(
             "url",
