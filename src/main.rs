@@ -39,6 +39,7 @@ const NOTE_ID_PREFIX: &str = env!("NOTE_ID_PREFIX");
 const USER_ID_PREFIX: &str = env!("USER_ID_PREFIX");
 const BIND_ADDRESS: &str = env!("BIND_ADDRESS");
 const SECRET_KEY: &str = env!("SECRET_KEY");
+const STACK_SIZE: usize = 8 * 1024 * 1024;
 static RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
     env!("MAIN_RELAYS")
         .split(',')
@@ -83,8 +84,7 @@ struct RelayId(u32);
 
 const MAIN_RELAY: RelayId = RelayId(0);
 
-#[tokio::main]
-async fn main() {
+fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -94,6 +94,16 @@ async fn main() {
         .init();
 
     assert!(SECRET_KEY.len() > 10);
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(STACK_SIZE)
+        .build()
+        .unwrap()
+        .block_on(run())
+}
+
+async fn run() {
     let db = Db::new().await;
     let relays = RELAYS
         .iter()
