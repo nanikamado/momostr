@@ -563,15 +563,34 @@ impl AppState {
                 _ => None,
             };
             let key = nostr_lib::Keys::new(actor.nsec.clone());
+            let mut about = actor.summary.clone();
+            let mut first_property = true;
+            let mut lud16 = None;
+            use std::fmt::Write;
+            for a in &actor.property_values {
+                if (a.name == "⚡" || a.name == "⚡\u{fe0f}") && a.value.contains('@') {
+                    lud16 = Some(a.value.clone());
+                } else {
+                    if first_property {
+                        first_property = false;
+                        if about.is_none() {
+                            about = Some(String::new());
+                        }
+                        writeln!(&mut about.as_mut().unwrap(), "\n")?;
+                    }
+                    writeln!(&mut about.as_mut().unwrap(), "{}: {}", a.name, a.value)?;
+                }
+            }
             let metadata = EventBuilder::new(
                 nostr_lib::Kind::Metadata,
                 Metadata {
                     name: Some(actor.name.clone()),
-                    about: actor.summary.clone(),
+                    about,
                     website: Some(actor.url.clone().unwrap_or_else(|| actor.id.clone())),
                     picture: actor.icon.clone(),
                     banner: actor.image.clone(),
                     nip05,
+                    lud16,
                     ..Default::default()
                 }
                 .as_json(),
@@ -658,6 +677,7 @@ pub struct Actor {
     pub id: String,
     pub preferred_username: Option<String>,
     pub tag: Vec<NoteTagForDe>,
+    pub property_values: Vec<PropertyValue>,
 }
 
 pub static HASHTAG_LINK_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -709,6 +729,15 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
                 id: a.id.clone(),
                 preferred_username: a.preferred_username,
                 tag: a.tag,
+                property_values: a
+                    .attachment
+                    .into_iter()
+                    .flatten()
+                    .map(|a| PropertyValue {
+                        name: a.name,
+                        value: html_to_text(&a.value),
+                    })
+                    .collect(),
             })))
         }
     }
@@ -731,6 +760,8 @@ pub struct ActorForParse {
     proxy_of: Option<ProxyOf>,
     #[serde(default)]
     tag: Vec<NoteTagForDe>,
+    #[serde(default)]
+    attachment: Vec<Option<PropertyValue>>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -769,6 +800,13 @@ impl<T> ListOrSingle<T> {
 #[serde(tag = "protocal", rename = "https://github.com/nostr-protocol/nostr")]
 struct ProxyOf {
     proxied: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(tag = "type")]
+pub struct PropertyValue {
+    name: String,
+    value: String,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
