@@ -732,10 +732,12 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
                 property_values: a
                     .attachment
                     .into_iter()
-                    .flatten()
-                    .map(|a| PropertyValue {
-                        name: a.name,
-                        value: html_to_text(&a.value),
+                    .flat_map(|a| match a {
+                        Attachement::PropertyValue { name, value } => Some(PropertyValue {
+                            name,
+                            value: html_to_text(&value),
+                        }),
+                        Attachement::Ohter(_) => None,
                     })
                     .collect(),
             })))
@@ -761,7 +763,7 @@ pub struct ActorForParse {
     #[serde(default)]
     tag: Vec<NoteTagForDe>,
     #[serde(default)]
-    attachment: Vec<Option<PropertyValue>>,
+    attachment: Vec<Attachement>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -802,11 +804,21 @@ struct ProxyOf {
     proxied: String,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-#[serde(tag = "type")]
+#[derive(Clone, Debug)]
 pub struct PropertyValue {
     name: String,
     value: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(tag = "type")]
+pub enum Attachement {
+    PropertyValue {
+        name: String,
+        value: String,
+    },
+    #[serde(untagged)]
+    Ohter(IgnoredAny),
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
