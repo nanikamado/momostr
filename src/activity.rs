@@ -46,6 +46,7 @@ pub struct Note {
     pub quote: Option<String>,
     pub in_reply_to: Option<String>,
     pub tag: Vec<NoteTagForSer>,
+    pub summary: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -120,6 +121,9 @@ impl Serialize for Note {
         }
         if !self.tag.is_empty() {
             m.serialize_entry("tag", &self.tag)?;
+        }
+        if let Some(summary) = &self.summary {
+            m.serialize_entry("summary", summary)?;
         }
         m.end()
     }

@@ -810,6 +810,7 @@ impl Note {
         let mut reply_positional = None;
         let mut event_has_marker = false;
         let mut tag = Vec::new();
+        let mut summary = None;
         for t in &event.tags {
             match t.as_standardized() {
                 Some(TagStandard::Event {
@@ -863,6 +864,9 @@ impl Note {
                         tag.push(NoteTagForSer::Mention { href, name });
                     }
                 }
+                Some(TagStandard::ContentWarning { reason }) => {
+                    summary = Some(reason.clone().unwrap_or_default());
+                }
                 _ => (),
             }
         }
@@ -915,6 +919,7 @@ impl Note {
             in_reply_to,
             quote: quote.map(|a| a.ap_id),
             tag,
+            summary,
         })
     }
 }
