@@ -63,7 +63,7 @@ pub async fn http_post_inbox(
         actor: actor_id,
     } = activity;
     match *activity_inner {
-        ActivityForDeInner::Follow { object, .. } => {
+        ActivityForDeInner::Follow { object, id } => {
             info!("{actor_id} followed {object}");
             let followee = get_npub_from_actor_id(object.as_ref())
                 .ok_or_else(|| Error::BadRequest(Some("object not found".to_string())))?;
@@ -73,6 +73,7 @@ pub async fn http_post_inbox(
             let object = object.to_string();
             let inbox = actor.inbox.clone();
             let actor_id = actor_id.to_string();
+            let id = id.map(|a| (*a).to_owned());
             tokio::spawn(async move {
                 if let Some(inbox) = inbox {
                     let _ = state
@@ -84,7 +85,7 @@ pub async fn http_post_inbox(
                                 object: FollowActivity {
                                     actor: actor_id.as_str(),
                                     object: object.as_str(),
-                                    id: None,
+                                    id: id.as_deref(),
                                 },
                             },
                         )
