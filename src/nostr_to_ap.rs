@@ -16,7 +16,7 @@ use html_escape::{encode_double_quoted_attribute, encode_text};
 use itertools::Itertools;
 use line_span::LineSpanExt;
 use linkify::{Link, LinkFinder, LinkKind};
-use nostr_lib::event::TagStandard;
+use nostr_lib::event::{Kind, TagStandard};
 use nostr_lib::nips::nip10::Marker;
 use nostr_lib::nips::nip19::{Nip19Event, Nip19Profile};
 use nostr_lib::nips::nip48::Protocol;
@@ -94,18 +94,19 @@ fn handle_event(
         )
     });
     if proxied {
-        let to_bot = event.tags.iter().any(|t| {
-            if let Some(TagStandard::PublicKey {
-                public_key,
-                uppercase: false,
-                ..
-            }) = t.as_standardized()
-            {
-                public_key == &*BOT_PUB
-            } else {
-                false
-            }
-        });
+        let to_bot = event.kind == Kind::TextNote
+            && event.tags.iter().any(|t| {
+                if let Some(TagStandard::PublicKey {
+                    public_key,
+                    uppercase: false,
+                    ..
+                }) = t.as_standardized()
+                {
+                    public_key == &*BOT_PUB
+                } else {
+                    false
+                }
+            });
         if to_bot {
             let state = state.clone();
             tokio::spawn(async move {
