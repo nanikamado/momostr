@@ -14,22 +14,22 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     let l = state.db.get_ap_id_of_npub(event.author_ref());
     let command = if let Some(id) = l {
         let stopped = state.db.is_stopped_ap(&id);
-        if command == "stop my mirror" {
+        if command == "stop" {
             if stopped {
-                "We have already stopped your mirror.".to_string()
+                "We have already stopped bridging you.".to_string()
             } else {
                 state.db.stop_ap(id.to_string());
                 "Stopped. \
-                    Send `restart my mirror` to this bot \
-                    if you want to restart your mirror account on the Fediverse."
+                    Send `restart` to this bot \
+                    if you want us to restart bridging your account."
                     .to_string()
             }
-        } else if command == "restart my mirror" {
+        } else if command == "restart" {
             if stopped {
                 state.db.restart_ap(&id);
                 "Restarted.".to_string()
             } else {
-                "Your mirror is not stopped. Your mirror is already working.".to_string()
+                "We are already briding your account.".to_string()
             }
         } else {
             format!("Command `{command}` is not supported.")
@@ -37,17 +37,17 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     } else {
         let npub = event.author_ref();
         let stopped = state.db.is_stopped_npub(npub);
-        if command == "stop my mirror" {
+        if command == "stop" {
             if stopped {
-                "We have already stopped your mirror.".to_string()
+                "We have already stopped bridging your account.".to_string()
             } else {
                 state.db.stop_npub(npub);
                 "Stopped. \
-                    Send `restart my mirror` to this bot \
-                    if you want to restart your mirror account on the Fediverse."
+                    Send `restart` to this bot \
+                    if you want us to restart briding your account."
                     .to_string()
             }
-        } else if command == "restart my mirror" {
+        } else if command == "restart" {
             if stopped {
                 state.db.restart_npub(npub);
                 if let Some(e) = state
@@ -71,9 +71,9 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                     "Restarted.".to_string()
                 } else {
                     "Restarted but, \
-                    but we are currently not mirroring your account because \
+                    we are currently not bridging your account because \
                     you don't have any followers on the Fediverse. \
-                    We will start mirroring your account once someone on the Fediverse follows you."
+                    We will start bridging your account once someone on the Fediverse follows you."
                         .to_string()
                 }
             } else if state
@@ -81,12 +81,11 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                 .get_followers_of_nostr(npub)
                 .map_or(false, |a| !a.is_empty())
             {
-                "Your mirror is not stopped. Your mirror is already working.".to_string()
+                "We are already briding your account.".to_string()
             } else {
-                "Your mirror is not stopped, \
-                    but we are currently not mirroring your account because \
-                    you don't have any followers on the Fediverse. \
-                    We will start mirroring your account once someone on the Fediverse follows you."
+                "We are currently not bridging your account because \
+                you don't have any followers on the Fediverse. \
+                We will start bridging your account once someone on the Fediverse follows you."
                     .to_string()
             }
         } else {
