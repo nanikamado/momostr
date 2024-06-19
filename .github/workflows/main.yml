@@ -42,6 +42,7 @@ env:
   OUTBOX_RELAYS: ""
   INBOX_RELAYS: ""
   MAIN_RELAYS: ""
+  EXTERNAL_MAIN_RELAYS: ""
   DOMAIN: momostr.test
   HTTPS_DOMAIN: https://momostr.test
   NOTE_ID_PREFIX: https://momostr.test/notes/

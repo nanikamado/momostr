@@ -46,6 +46,12 @@ static RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
         .filter(|a| !a.is_empty())
         .collect_vec()
 });
+static RELAYS_EXTERNAL: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("EXTERNAL_MAIN_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
 static INBOX_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
     env!("INBOX_RELAYS")
         .split(',')
@@ -105,16 +111,15 @@ fn main() {
 
 async fn run() {
     let db = Db::new().await;
-    let relays = RELAYS
-        .iter()
-        .map(|l| url::Url::parse(l).unwrap())
-        .collect_vec();
     let nostr = RelayPool::new(USER_AGENT.to_string()).await;
-    for (i, l) in relays.iter().enumerate() {
-        nostr.add_relay(RelayId(i as u32), l.clone()).await.unwrap();
+    for (i, l) in RELAYS.iter().enumerate() {
+        nostr
+            .add_relay(RelayId(i as u32), url::Url::parse(l).unwrap())
+            .await
+            .unwrap();
     }
     let main_relays: Arc<FxHashSet<RelayId>> =
-        Arc::new((0..relays.len()).map(|a| RelayId(a as u32)).collect());
+        Arc::new((0..RELAYS.len()).map(|a| RelayId(a as u32)).collect());
     let mut relay_count = RELAYS.len();
     let mut metadata_relays = FxHashSet::default();
     for mr in &*METADATA_RELAYS {
@@ -157,7 +162,7 @@ async fn run() {
     let http_client = reqwest::Client::new();
     let state = Arc::new(AppState {
         nostr,
-        relay_url: relays,
+        relay_url: RELAYS_EXTERNAL.iter().map(|a| a.to_string()).collect(),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),

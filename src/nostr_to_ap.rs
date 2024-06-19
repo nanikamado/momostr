@@ -1123,7 +1123,7 @@ mod tests {
 
                 Arc::new(AppState {
                     nostr,
-                    relay_url: relays,
+                    relay_url: relays.into_iter().map(|a| a.to_string()).collect(),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
                     actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),

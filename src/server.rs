@@ -51,7 +51,7 @@ pub struct AppState {
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,
     pub nostr_user_cache: Mutex<TimedSizedCache<nostr_lib::PublicKey, LazyUser>>,
-    pub relay_url: Vec<url::Url>,
+    pub relay_url: Vec<String>,
     pub main_relays: Arc<FxHashSet<RelayId>>,
     pub metadata_relays: Arc<FxHashSet<RelayId>>,
     pub event_deletion_queue: EventDeletionQueue,
