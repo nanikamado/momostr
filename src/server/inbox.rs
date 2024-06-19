@@ -38,7 +38,7 @@ pub async fn http_post_inbox(
     let body = to_bytes(request.into_body(), 1_000_000_000).await?;
     debug!("/inbox <== {}", std::str::from_utf8(&body).unwrap());
     let activity: ActivityForDe = serde_json::from_slice(&body)?;
-    if let ActivityForDeInner::Delete(Delete::User { .. }) = &*activity.activity_inner {
+    if let ActivityForDeInner::Delete(Delete::User { .. }) = &activity.activity_inner {
         trace!("ignored user delete activity");
         return Ok(());
     }
@@ -62,7 +62,7 @@ pub async fn http_post_inbox(
         activity_inner,
         actor: actor_id,
     } = activity;
-    match *activity_inner {
+    match activity_inner {
         ActivityForDeInner::Follow { object, id } => {
             info!("{actor_id} followed {object}");
             let followee = get_npub_from_actor_id(object.as_ref())
@@ -111,7 +111,7 @@ pub async fn http_post_inbox(
                 state.nostr_send(Arc::new(l)).await;
             });
         }
-        ActivityForDeInner::Undo { object } => match *object.activity_inner {
+        ActivityForDeInner::Undo { object } => match object.activity_inner {
             ActivityForDeInner::Follow { object, .. } => {
                 info!("{actor_id} unfollowed {object}");
                 let object = get_npub_from_actor_id(object.as_ref())

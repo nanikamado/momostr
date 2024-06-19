@@ -268,7 +268,7 @@ pub struct ActivityForDe<'a> {
     #[serde(borrow)]
     pub actor: Cow<'a, str>,
     #[serde(flatten)]
-    pub activity_inner: Box<ActivityForDeInner<'a>>,
+    pub activity_inner: ActivityForDeInner<'a>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -337,7 +337,7 @@ pub enum ActivityForDeInner<'a> {
     },
     Undo {
         #[serde(borrow)]
-        object: ActivityForDe<'a>,
+        object: Box<ActivityForDe<'a>>,
     },
     Like {
         object: Cow<'a, str>,
