@@ -1,7 +1,7 @@
 use super::AppState;
 use crate::activity::{
-    AcceptActivity, ActivityForDe, ActivityForDeInner, Actor, ActorOrProxied, Delete,
-    FollowActivity, NoteForDe, NoteTagForDe, HASHTAG_LINK_REGEX,
+    AcceptActivity, ActivityForDe, ActivityForDeInner, Actor, ActorOrProxied, FollowActivity,
+    NoteForDe, NoteTagForDe, StrOrId, HASHTAG_LINK_REGEX,
 };
 use crate::error::Error;
 use crate::util::get_media_type;
@@ -38,9 +38,13 @@ pub async fn http_post_inbox(
     let body = to_bytes(request.into_body(), 1_000_000_000).await?;
     debug!("/inbox <== {}", std::str::from_utf8(&body).unwrap());
     let activity: ActivityForDe = serde_json::from_slice(&body)?;
-    if let ActivityForDeInner::Delete(Delete::User { .. }) = &activity.activity_inner {
-        trace!("ignored user delete activity");
-        return Ok(());
+    if let ActivityForDeInner::Delete { object } = &activity.activity_inner {
+        let object_id =
+            InternalApId::get(Cow::Owned(object.0.to_string()), activity.actor.as_ref())?;
+        if state.db.get_event_id_from_ap_id(&object_id).is_none() {
+            trace!("ignored delete activity as the object not found");
+            return Ok(());
+        }
     }
     let actor = state.get_actor_data(activity.actor.as_ref()).await?;
     let ActorOrProxied::Actor(actor) = actor else {
@@ -293,9 +297,10 @@ pub async fn http_post_inbox(
                 send_event(&state, Arc::new(event), ap_id.into_owned()).await;
             }
         }
-        ActivityForDeInner::Delete(Delete::Note { object }) => {
-            let object_id =
-                InternalApId::get(Cow::Owned(object.id.to_string()), actor_id.as_ref())?;
+        ActivityForDeInner::Delete {
+            object: StrOrId(id),
+        } => {
+            let object_id = InternalApId::get(Cow::Owned(id.to_string()), actor_id.as_ref())?;
             if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
                 info!("sending delete request ...");
                 let nsec = actor.nsec.clone();
@@ -320,7 +325,6 @@ pub async fn http_post_inbox(
             info!("update of actor");
             state.update_actor_metadata(&object).await?;
         }
-        ActivityForDeInner::Delete(Delete::User { .. }) => panic!(),
         ActivityForDeInner::Other(a) => {
             info!("not implemented {}", a);
         }

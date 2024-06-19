@@ -361,26 +361,31 @@ pub enum ActivityForDeInner<'a> {
     Create {
         object: Box<NoteForDe>,
     },
-    Delete(Delete<'a>),
+    Delete {
+        object: StrOrId<'a>,
+    },
     #[serde(untagged)]
     Other(Value),
 }
 
-#[derive(Deserialize, Clone, Debug, PartialEq)]
-#[serde(untagged)]
-pub enum Delete<'a> {
-    User {
-        object: Cow<'a, str>,
-    },
-    Note {
-        #[serde(borrow)]
-        object: Tombstone<'a>,
-    },
-}
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrOrId<'a>(pub Cow<'a, str>);
 
-#[derive(Deserialize, Clone, Debug, PartialEq)]
-pub struct Tombstone<'a> {
-    pub id: Cow<'a, str>,
+impl<'a, 'b> Deserialize<'a> for StrOrId<'b> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'a>,
+    {
+        #[derive(Deserialize, Clone, Debug, PartialEq)]
+        #[serde(untagged)]
+        pub enum StrOrIdInner<'a> {
+            Str(Cow<'a, str>),
+            Id { id: Cow<'a, str> },
+        }
+        let (StrOrIdInner::Str(id) | StrOrIdInner::Id { id }) =
+            StrOrIdInner::deserialize(deserializer)?;
+        Ok(Self(id))
+    }
 }
 
 impl<'a> AsRef<ActivityForDe<'a>> for ActivityForDe<'a> {
@@ -945,24 +950,33 @@ struct EndPoints {
 #[cfg(test)]
 mod tests {
     use super::{ListOrSingle, NoteForDe, UrlStruct};
-    use crate::activity::{ActivityForDeInner, ActorOrProxied, Delete, OptionForDe};
+    use crate::activity::{ActivityForDeInner, ActorOrProxied, OptionForDe, StrOrId};
     use serde::de::IgnoredAny;
 
     #[test]
     fn activity_de_1() {
         let a = r##"{"@context":"https://www.w3.org/ns/activitystreams","id":"https://example.com/users/example#delete","type":"Delete","to":["https://www.w3.org/ns/activitystreams#Public"],"object":"https://example.com/users/example","signature":{"type":"RsaSignature2017","creator":"https://example.com/users/example#main-key","created":"2024-03-03T06:10:00Z","signatureValue":"GSezGidctZL35ZWgUf4Kw59qwQF+lb/soQ2pvBweNfk3+k2YfgVwCXN4wNBuLwOZ2jAiRyKYlwSC6V52FhgIU0CCUjIYSCUSijPkqbfdj7KshCH3RxrVymqe1jbh+O6epZY5WRDbe93a7NHgiYCdjdWvUR8jNeoHjkOdpq4gB1GoCtfF68tZX/ExnuT28b8kh5EkWyuxp46tQ//uhCKDUI5wCD3oB9PZV7NoeV0tp2xKEjRFQf3dZbUTpdHO8k24sCDl3+aRm9jWnsQ7I/K4FYrFq0RPLxstxq5lnNKhGOpLswYFjNvCW2C4qX3IVce+6aYDcoP+E26QQlgmknxhiA=="}}"##;
-        let a: ActivityForDeInner = serde_json::from_str(a).unwrap();
-        assert!(matches!(a, ActivityForDeInner::Delete(Delete::User { .. })));
+        if let ActivityForDeInner::Delete {
+            object: StrOrId(id),
+        } = serde_json::from_str(a).unwrap()
+        {
+            assert_eq!(id, "https://example.com/users/example");
+        } else {
+            panic!()
+        }
     }
 
     #[test]
     fn activity_de_2() {
         let a = r##"{"@context":["https://www.w3.org/ns/activitystreams","https://w3id.org/security/v1",{"Key":"sec:Key","manuallyApprovesFollowers":"as:manuallyApprovesFollowers","sensitive":"as:sensitive","Hashtag":"as:Hashtag","quoteUrl":"as:quoteUrl","toot":"http://joinmastodon.org/ns#","Emoji":"toot:Emoji","featured":"toot:featured","discoverable":"toot:discoverable","schema":"http://schema.org#","PropertyValue":"schema:PropertyValue","value":"schema:value","misskey":"https://misskey-hub.net/ns#","_misskey_content":"misskey:_misskey_content","_misskey_quote":"misskey:_misskey_quote","_misskey_reaction":"misskey:_misskey_reaction","_misskey_votes":"misskey:_misskey_votes","_misskey_summary":"misskey:_misskey_summary","isCat":"misskey:isCat","vcard":"http://www.w3.org/2006/vcard/ns#"}],"type":"Delete","object":{"id":"https://example.com/notes/aaa","type":"Tombstone"},"published":"2024-03-03T12:00:14.757Z","id":"https://example.com"}"##;
-        let a: ActivityForDeInner = serde_json::from_str(a).unwrap();
-        assert!(matches!(
-            a,
-            ActivityForDeInner::Delete(Delete::Note { object: _ })
-        ));
+        if let ActivityForDeInner::Delete {
+            object: StrOrId(id),
+        } = serde_json::from_str(a).unwrap()
+        {
+            assert_eq!(id, "https://example.com/notes/aaa");
+        } else {
+            panic!()
+        }
     }
 
     #[test]
