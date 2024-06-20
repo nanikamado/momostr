@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::rsa_keys::RSA_PRIVATE_KEY_FOR_SIGH;
 use crate::server::{event_tag, AppState, WithContext};
 use crate::{
-    html_to_text, HTTPS_DOMAIN, INBOX_RELAYS, NOTE_ID_PREFIX, OUTBOX_RELAYS, SECRET_KEY,
+    html_to_text, HTTPS_DOMAIN, INBOX_RELAYS, KEY_ID, NOTE_ID_PREFIX, OUTBOX_RELAYS, SECRET_KEY,
     USER_AGENT, USER_ID_PREFIX,
 };
 use axum::http::{Method, Request, Uri};
@@ -489,8 +489,7 @@ impl AppState {
             .header(axum::http::header::CONTENT_TYPE, "text/plain")
             .body(())
             .unwrap();
-        const KEY_ID: &str = "https://worker-hidden-bonus-1869.n-mado.workers.dev";
-        SigningConfig::new(RsaSha256, &RSA_PRIVATE_KEY_FOR_SIGH, KEY_ID)
+        SigningConfig::new(RsaSha256, &RSA_PRIVATE_KEY_FOR_SIGH, &*KEY_ID)
             .sign(&mut r)
             .unwrap();
         let t = self

@@ -18,7 +18,7 @@ use itertools::Itertools;
 use lru::LruCache;
 use nostr_lib::types::Filter;
 use nostr_lib::{
-    EventBuilder, FromBech32, JsonUtil, Kind, Metadata, PublicKey, SecretKey, Timestamp,
+    EventBuilder, FromBech32, JsonUtil, Kind, Metadata, PublicKey, SecretKey, Timestamp, ToBech32,
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -84,6 +84,8 @@ static USER_AGENT: Lazy<String> =
     Lazy::new(|| format!("Momostr/{} ({HTTPS_DOMAIN})", env!("CARGO_PKG_VERSION")));
 static NPUB_REG: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?:nostr:)?(npub1[0-9a-z]{50,}|nprofile1[0-9a-z]{50,})").unwrap());
+static KEY_ID: Lazy<String> =
+    Lazy::new(|| format!("{USER_ID_PREFIX}{}", BOT_PUB.to_bech32().unwrap()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct RelayId(u32);
