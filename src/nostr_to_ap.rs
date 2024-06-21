@@ -2,7 +2,7 @@ use crate::activity::{
     Actor, ActorOrProxied, AnnounceForSer, Attachment, CreateForSer, DeleteForSer, FollowActivity,
     ImageForSe, Note, NoteForDe, NoteTagForSer, ReactionForSer, UndoFollowActivity, UpdateForSer,
 };
-use crate::bot::handle_message_to_bot;
+use crate::bot::{handle_dm_message_to_bot, handle_message_to_bot};
 use crate::error::Error;
 use crate::nostr::{get_nostr_user_data, NostrUser};
 use crate::server::{metadata_to_activity, AppState};
@@ -419,6 +419,12 @@ fn handle_event(
                     });
                 }
             };
+        }
+        nostr_lib::Kind::EncryptedDirectMessage => {
+            let state = state.clone();
+            tokio::spawn(async move {
+                handle_dm_message_to_bot(&state, event).await;
+            });
         }
         _ => (),
     }

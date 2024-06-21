@@ -17,9 +17,7 @@ use html_to_md::FmtHtmlToMd;
 use itertools::Itertools;
 use lru::LruCache;
 use nostr_lib::types::Filter;
-use nostr_lib::{
-    EventBuilder, FromBech32, JsonUtil, Kind, Metadata, PublicKey, SecretKey, Timestamp, ToBech32,
-};
+use nostr_lib::{FromBech32, Kind, PublicKey, SecretKey, Timestamp, ToBech32};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
@@ -80,6 +78,8 @@ const CONTACT_LIST_LEN_LIMIT: usize = 500;
 static BOT_SEC: Lazy<SecretKey> = Lazy::new(|| SecretKey::from_bech32(env!("BOT_NSEC")).unwrap());
 static BOT_PUB: Lazy<PublicKey> =
     Lazy::new(|| nostr_lib::key::Keys::new(BOT_SEC.clone()).public_key());
+static ADMIN_PUB: Lazy<Option<PublicKey>> =
+    Lazy::new(|| Some(PublicKey::from_bech32(option_env!("ADMIN_NPUB")?).unwrap()));
 static USER_AGENT: Lazy<String> =
     Lazy::new(|| format!("Momostr/{} ({HTTPS_DOMAIN})", env!("CARGO_PKG_VERSION")));
 static NPUB_REG: Lazy<Regex> =
@@ -138,29 +138,8 @@ async fn run() {
         };
         metadata_relays.insert(i);
     }
-    {
-        let key = nostr_lib::Keys::new(BOT_SEC.clone());
-        let metadata = EventBuilder::new(
-            nostr_lib::Kind::Metadata,
-            Metadata {
-                name: Some("momostr.pink Bot".to_string()),
-                display_name: None,
-                about: Some("wip".to_string()),
-                website: Some("momostr.pink".to_string()),
-                picture: None,
-                nip05: None,
-                ..Default::default()
-            }
-            .as_json(),
-            [],
-        )
-        .custom_created_at(Timestamp::from(1700000000))
-        .to_event(&key)
-        .unwrap();
-        nostr.send(Arc::new(metadata), main_relays.clone()).await;
-    }
     let filter = get_filter();
-    let event_stream = nostr.subscribe(vec![filter], main_relays.clone()).await;
+    let event_stream = nostr.subscribe(filter, main_relays.clone()).await;
     let http_client = reqwest::Client::new();
     let state = Arc::new(AppState {
         nostr,
@@ -183,23 +162,31 @@ async fn run() {
     .unwrap();
 }
 
-fn get_filter() -> Filter {
-    Filter {
-        since: Some(Timestamp::now() - Duration::from_secs(60 * 3)),
-        kinds: Some(
-            [
-                Kind::ContactList,
-                Kind::TextNote,
-                Kind::EventDeletion,
-                Kind::Reaction,
-                Kind::Repost,
-                Kind::Metadata,
-            ]
-            .into_iter()
-            .collect(),
-        ),
-        ..Default::default()
-    }
+fn get_filter() -> Vec<Filter> {
+    vec![
+        Filter {
+            since: Some(Timestamp::now() - Duration::from_secs(60 * 3)),
+            kinds: Some(
+                [
+                    Kind::ContactList,
+                    Kind::TextNote,
+                    Kind::EventDeletion,
+                    Kind::Reaction,
+                    Kind::Repost,
+                    Kind::Metadata,
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            ..Default::default()
+        },
+        Filter {
+            since: Some(Timestamp::now() - Duration::from_secs(60 * 3)),
+            kinds: Some([Kind::EncryptedDirectMessage].into_iter().collect()),
+            ..Default::default()
+        }
+        .pubkey(*BOT_PUB),
+    ]
 }
 
 fn html_to_text(html: &str) -> String {
