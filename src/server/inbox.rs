@@ -271,7 +271,7 @@ pub async fn http_post_inbox(
                 return Ok(());
             }
             if let Ok(event) =
-                get_event_from_object_id(&state, object.to_string(), Cow::Borrowed(&[])).await
+                get_event_from_object_id(&state, object.0.to_string(), Cow::Borrowed(&[])).await
             {
                 let event = EventBuilder::new(
                     nostr_lib::Kind::Repost,

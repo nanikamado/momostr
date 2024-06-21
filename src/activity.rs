@@ -348,7 +348,7 @@ pub enum ActivityForDeInner<'a> {
     },
     Announce {
         id: Cow<'a, str>,
-        object: Cow<'a, str>,
+        object: StrOrId<'a>,
         published: DateTime<Utc>,
         #[serde(default)]
         to: Vec<Cow<'a, str>>,
@@ -755,6 +755,7 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
+#[serde(tag = "type", rename = "Person")]
 pub struct ActorForParse {
     public_key: PublicKeyJsonInner,
     endpoints: Option<EndPoints>,
