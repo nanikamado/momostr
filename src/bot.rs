@@ -124,7 +124,7 @@ async fn handle_command_from_fediverse_account(
     command: &str,
 ) -> String {
     let stopped = state.db.is_stopped_ap(id);
-    if command == "stop" {
+    if command.contains("stop") {
         if stopped {
             "We have already stopped bridging you.".to_string()
         } else {
@@ -134,7 +134,7 @@ async fn handle_command_from_fediverse_account(
                 if you want us to restart bridging your account."
                 .to_string()
         }
-    } else if command == "restart" {
+    } else if command.contains("restart") {
         if stopped {
             state.db.restart_ap(id);
             "Restarted.".to_string()
