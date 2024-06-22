@@ -13,10 +13,11 @@ pub use crate::server::inbox::{event_tag, InternalApId};
 use crate::server::nodeinfo::well_known_nodeinfo;
 use crate::util::Merge;
 use crate::{
-    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS, RELAYS, USER_AGENT, USER_ID_PREFIX,
+    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS, RELAYS, RELAYS_EXTERNAL,
+    USER_AGENT, USER_ID_PREFIX,
 };
 use axum::extract::{Path, Query, Request, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_macros::debug_handler;
@@ -32,6 +33,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
 use relay_pool::{EventWithRelayId, RelayPool};
+use reqwest::header::HeaderMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
@@ -469,19 +471,36 @@ pub async fn metadata_to_activity<'a>(
 }
 
 #[debug_handler]
-#[tracing::instrument(skip(state))]
+#[tracing::instrument(skip(state, headers))]
 pub async fn http_get_user(
     Path(npub): Path<String>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> Result<axum::http::Response<axum::body::Body>, Error> {
-    debug!("get user");
     let public_key = nostr_lib::PublicKey::from_bech32(&npub).map_err(|_| Error::NotFound)?;
-    let a = &*get_nostr_user_data(&state, public_key).await;
-    match a.as_ref().map_err(|e| e.clone())? {
-        NostrUser::Proxied(_) => Err(Error::NotFound),
-        NostrUser::Metadata(metadata) => Ok(metadata_to_activity(&state, public_key, metadata)
-            .await
-            .into_response()),
+    if headers
+        .get(reqwest::header::ACCEPT)
+        .and_then(|a| a.to_str().ok())
+        .map_or(false, |a| a.contains("text/html") && !a.contains("json"))
+    {
+        debug!("redirect");
+        Ok(Redirect::to(&format!(
+            "https://coracle.social/{}",
+            Nip19Profile::new(public_key, [RELAYS_EXTERNAL[0]])
+                .unwrap()
+                .to_bech32()
+                .unwrap()
+        ))
+        .into_response())
+    } else {
+        debug!("activity");
+        let a = &*get_nostr_user_data(&state, public_key).await;
+        match a.as_ref().map_err(|e| e.clone())? {
+            NostrUser::Proxied(_) => Err(Error::NotFound),
+            NostrUser::Metadata(metadata) => Ok(metadata_to_activity(&state, public_key, metadata)
+                .await
+                .into_response()),
+        }
     }
 }
 
