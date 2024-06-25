@@ -202,6 +202,9 @@ impl Serialize for ReactionForSer<'_> {
         m.serialize_entry("object", &self.object)?;
         if let Some(t) = &self.content {
             m.serialize_entry("content", t)?;
+
+            // need to work with pleroma (https://git.pleroma.social/pleroma/pleroma/-/blob/9953b0da59924f936ecc646b22cd3e3a58493d6a/lib/pleroma/web/activity_pub/transmogrifier.ex#L453)
+            m.serialize_entry("_misskey_reaction", t)?;
         }
         if let Some(t) = &self.tag {
             m.serialize_entry("tag", &[t])?;
