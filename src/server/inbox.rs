@@ -1,7 +1,7 @@
 use super::AppState;
 use crate::activity::{
     AcceptActivity, ActivityForDe, ActivityForDeInner, Actor, ActorOrProxied, FollowActivity,
-    NoteForDe, NoteTagForDe, StrOrId, HASHTAG_LINK_REGEX,
+    NoteForDe, NoteTagForDe, StrOrId, AS_PUBLIC, HASHTAG_LINK_REGEX,
 };
 use crate::error::Error;
 use crate::util::get_media_type;
@@ -171,7 +171,12 @@ pub async fn http_post_inbox(
         },
         ActivityForDeInner::Create { object } => {
             debug!("create");
-            if let Some(npub) = &object.url.proxied_from {
+            if let Some(npub) = object
+                .url
+                .proxied_from
+                .as_ref()
+                .or(object.proxy_of.as_ref().map(|a| &a.proxied))
+            {
                 return Err(Error::BadRequest(
                     format!("{npub} is already a nostr event").into(),
                 ));
@@ -253,14 +258,10 @@ pub async fn http_post_inbox(
             if state.db.is_stopped_ap(actor_id.as_ref()) {
                 return Ok(());
             }
-            let is_private = !to.iter().chain(cc.iter()).any(|a| {
-                [
-                    "https://www.w3.org/ns/activitystreams#Public",
-                    "Public",
-                    "as:Public",
-                ]
-                .contains(&a.as_ref())
-            });
+            let is_private = !to
+                .iter()
+                .chain(cc.iter())
+                .any(|a| [AS_PUBLIC, "Public", "as:Public"].contains(&a.as_ref()));
             if is_private {
                 return Ok(());
             }
@@ -508,14 +509,11 @@ async fn get_event_from_note<'a>(
     actor: Arc<Actor>,
     visited: Cow<'_, [String]>,
 ) -> Result<Arc<Event>, NostrConversionError> {
-    let is_private_note = !note.to.iter().chain(note.cc.iter()).any(|a| {
-        [
-            "https://www.w3.org/ns/activitystreams#Public",
-            "Public",
-            "as:Public",
-        ]
-        .contains(&a.as_str())
-    });
+    let is_private_note = !note
+        .to
+        .iter()
+        .chain(note.cc.iter())
+        .any(|a| [AS_PUBLIC, "Public", "as:Public"].contains(&a.as_str()));
     let mut tags: FxHashSet<nostr_lib::Tag> = FxHashSet::default();
     if let Some(r) = note.summary {
         if !r.is_empty() {

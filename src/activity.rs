@@ -15,7 +15,7 @@ use regex::Regex;
 use reqwest::header::HeaderMap;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::digest::FixedOutput;
 use sha2::Digest;
 use sha3::Sha3_256;
@@ -26,6 +26,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 use url::Url;
+
+pub const AS_PUBLIC: &str = "https://www.w3.org/ns/activitystreams#Public";
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type", rename = "Document", rename_all = "camelCase")]
@@ -93,19 +95,35 @@ impl Serialize for Note {
         m.serialize_entry("id", &format_args!("{NOTE_ID_PREFIX}{}", self.id))?;
         m.serialize_entry(
             "url",
-            &[
-                LinkForSer {
-                    rel: None,
-                    href: &format_args!("https://coracle.social/{}", self.nevent),
-                },
-                LinkForSer {
-                    rel: Some("canonical"),
-                    href: &format_args!("nostr:{}", self.id),
-                },
-            ],
+            &format_args!("https://coracle.social/{}", self.nevent),
         )?;
+        m.serialize_entry(
+            "proxyOf",
+            &[&json!({
+                "protocol": "https://github.com/nostr-protocol/nostr",
+                "proxied": self.id,
+                "authoritative": true,
+            })],
+        )?;
+        // Pleroma does not accept notes with FEP-fffd style urls like this:
+        // ```
+        // m.serialize_entry(
+        //     "url",
+        //     &[
+        //         LinkForSer {
+        //             rel: None,
+        //             href: &format_args!("https://coracle.social/{}", self.nevent),
+        //         },
+        //         LinkForSer {
+        //             rel: Some("canonical"),
+        //             href: &format_args!("nostr:{}", self.id),
+        //         },
+        //     ],
+        // )?;
+        // ```
         m.serialize_entry("attributedTo", &self.author)?;
-        m.serialize_entry("to", &["Public"])?;
+        // Pleroma does not recognize `Public` or `as:Public`
+        m.serialize_entry("to", &[AS_PUBLIC])?;
         m.serialize_entry("content", &self.content)?;
         m.serialize_entry("_misskey_content", &self.misskey_content)?;
         m.serialize_entry("published", &self.published)?;
@@ -147,7 +165,7 @@ impl Serialize for CreateForSer<'_> {
         let mut m = serializer.serialize_map(None)?;
         m.serialize_entry("type", "Create")?;
         m.serialize_entry("id", &format_args!("{HTTPS_DOMAIN}/create/{}", self.id))?;
-        m.serialize_entry("to", &["Public"])?;
+        m.serialize_entry("to", &[AS_PUBLIC])?;
         m.serialize_entry("actor", &self.actor)?;
         m.serialize_entry("object", &self.object)?;
         m.serialize_entry("published", &self.published)?;
@@ -288,6 +306,7 @@ pub struct NoteForDe {
     pub attachment: Vec<AttachedImage>,
     #[serde(default)]
     pub url: ActorUrl,
+    pub proxy_of: Option<ProxyOf>,
     pub attributed_to: String,
     pub quote_url: Option<String>,
     // threads.net only provides `_misskey_quote`
@@ -827,10 +846,10 @@ impl<T> ListOrSingle<T> {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "protocal", rename = "https://github.com/nostr-protocol/nostr")]
-struct ProxyOf {
-    proxied: String,
+pub struct ProxyOf {
+    pub proxied: String,
 }
 
 #[derive(Clone, Debug)]
