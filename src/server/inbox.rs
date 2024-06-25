@@ -394,6 +394,7 @@ pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<nostr_l
                 },
                 TagStandard::LabelNamespace(REVERSE_DNS.to_string()),
                 TagStandard::Label(vec![id_for_l, REVERSE_DNS.to_string()]),
+                TagStandard::Expiration(Timestamp::now() + 2592000),
             ]
             .map(|t| t.into()),
         )
