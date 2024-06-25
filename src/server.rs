@@ -309,7 +309,7 @@ impl<T: Serialize> Serialize for WithContext<T> {
 pub struct MetadataActivity<'a> {
     metadata: &'a Metadata,
     npub: PublicKey,
-    sumarry: Option<String>,
+    summary: Option<String>,
 }
 
 impl Serialize for MetadataActivity<'_> {
@@ -380,7 +380,7 @@ impl Serialize for MetadataActivity<'_> {
                 "authoritative": true,
             })],
         )?;
-        if let Some(summary) = &self.sumarry {
+        if let Some(summary) = &self.summary {
             m.serialize_entry("summary", summary)?;
         }
         if let Some(icon) = &self.metadata.picture {
@@ -435,8 +435,8 @@ pub async fn metadata_to_activity<'a>(
     npub: PublicKey,
     metadata: &'a Metadata,
 ) -> MetadataActivity<'a> {
-    let sumarry = if let Some(a) = &metadata.about {
-        let mut sumarry = Content {
+    let summary = if let Some(a) = &metadata.about {
+        let mut summary = Content {
             html: String::with_capacity(a.len()),
             misskey: String::with_capacity(a.len()),
         };
@@ -447,10 +447,10 @@ pub async fn metadata_to_activity<'a>(
         };
         for span in spans {
             if span.kind().is_some() {
-                sumarry.link(span.as_str());
+                summary.link(span.as_str());
             } else {
                 replace_npub_with_ap_handle(
-                    &mut sumarry,
+                    &mut summary,
                     span.as_str(),
                     state,
                     &mut FxHashMap::default(),
@@ -459,14 +459,14 @@ pub async fn metadata_to_activity<'a>(
                 .unwrap();
             }
         }
-        Some(sumarry.html)
+        Some(summary.html)
     } else {
         None
     };
     MetadataActivity {
         metadata,
         npub,
-        sumarry,
+        summary,
     }
 }
 

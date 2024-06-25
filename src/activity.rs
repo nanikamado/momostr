@@ -221,7 +221,7 @@ impl Serialize for ReactionForSer<'_> {
         if let Some(t) = &self.content {
             m.serialize_entry("content", t)?;
 
-            // need to work with pleroma (https://git.pleroma.social/pleroma/pleroma/-/blob/9953b0da59924f936ecc646b22cd3e3a58493d6a/lib/pleroma/web/activity_pub/transmogrifier.ex#L453)
+            // needed to work with Pleroma (https://git.pleroma.social/pleroma/pleroma/-/blob/9953b0da59924f936ecc646b22cd3e3a58493d6a/lib/pleroma/web/activity_pub/transmogrifier.ex#L453)
             m.serialize_entry("_misskey_reaction", t)?;
         }
         if let Some(t) = &self.tag {
@@ -555,7 +555,7 @@ impl AppState {
                 debug!("retrying ...");
                 match self.get_activity_json(url).await {
                     Ok(actor) => {
-                        debug!("retry successed");
+                        debug!("retry succeeded");
                         Ok(actor)
                     }
                     Err(e) => {
@@ -780,11 +780,11 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
                     .attachment
                     .into_iter()
                     .flat_map(|a| match a {
-                        Attachement::PropertyValue { name, value } => Some(PropertyValue {
+                        ActorAttachment::PropertyValue { name, value } => Some(PropertyValue {
                             name,
                             value: html_to_text(&value),
                         }),
-                        Attachement::Ohter(_) => None,
+                        ActorAttachment::Other(_) => None,
                     })
                     .collect(),
             })))
@@ -811,7 +811,7 @@ pub struct ActorForParse {
     #[serde(default)]
     tag: Vec<NoteTagForDe>,
     #[serde(default)]
-    attachment: Vec<Attachement>,
+    attachment: Vec<ActorAttachment>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -847,7 +847,7 @@ impl<T> ListOrSingle<T> {
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(tag = "protocal", rename = "https://github.com/nostr-protocol/nostr")]
+#[serde(tag = "protocol", rename = "https://github.com/nostr-protocol/nostr")]
 pub struct ProxyOf {
     pub proxied: String,
 }
@@ -860,13 +860,13 @@ pub struct PropertyValue {
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
-pub enum Attachement {
+pub enum ActorAttachment {
     PropertyValue {
         name: String,
         value: String,
     },
     #[serde(untagged)]
-    Ohter(IgnoredAny),
+    Other(IgnoredAny),
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]

@@ -58,7 +58,7 @@ pub async fn http_post_inbox(
             .map_err(|e| Error::BadRequest(Some(e.to_string())))?
         {
             return Err(Error::BadRequest(Some(
-                "failded to verify HTTP signature".to_string(),
+                "failed to verify HTTP signature".to_string(),
             )));
         }
     }
@@ -214,7 +214,7 @@ pub async fn http_post_inbox(
             let mut tags = vec![Tag::event(note.id), Tag::public_key(note.pubkey)];
             let mut content_converted = Cow::Borrowed("+");
             if let Some(content) = content {
-                let emoij = tag.iter().find_map(|t| {
+                let emoji = tag.iter().find_map(|t| {
                     if let NoteTagForDe::Emoji { name, icon } = t {
                         if name.as_ref() == content {
                             Some(TagStandard::Emoji {
@@ -229,7 +229,7 @@ pub async fn http_post_inbox(
                     }
                 });
                 content_converted = content;
-                if let Some(e) = emoij {
+                if let Some(e) = emoji {
                     tags.push(e.into());
                 }
             }
@@ -418,7 +418,7 @@ async fn get_event_from_object_id<'a>(
             .ok_or(NostrConversionError::CouldNotGetEventFromNostr);
     }
     if visited.contains(&url) {
-        return Err(NostrConversionError::CyclicRefernce);
+        return Err(NostrConversionError::CyclicReference);
     }
     if visited.len() > 100 {
         return Err(NostrConversionError::TooLongThread);
@@ -494,7 +494,7 @@ enum NostrConversionError {
     IsPrivate,
     OptOutedAccount,
     IsProxied,
-    CyclicRefernce,
+    CyclicReference,
     CouldNotGetEventFromNostr,
     CouldNotGetObjectFromAp,
     InvalidEventId,
@@ -795,6 +795,7 @@ mod tests {
 
     #[test]
     fn remove_mention_2() {
+        // cSpell:disable
         let s = "@momo_test test🍉";
         let a = HEAD_MENTIONS_REGEX.find(s).unwrap();
         debug_assert_eq!(&s[a.end()..], "test🍉");
