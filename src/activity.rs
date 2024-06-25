@@ -397,11 +397,28 @@ impl<'a> AsRef<ActivityForDe<'a>> for ActivityForDe<'a> {
     }
 }
 
-#[derive(Serialize, Clone, Debug)]
-#[serde(tag = "type", rename = "Accept")]
+#[derive(Clone, Debug)]
 pub struct AcceptActivity<'a> {
     pub object: FollowActivity<'a>,
     pub actor: &'a str,
+}
+
+impl<'a> Serialize for AcceptActivity<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut m = serializer.serialize_map(None)?;
+        m.serialize_entry("type", "Accept")?;
+        if let Some(id) = self.object.id {
+            m.serialize_entry("id", &format_args!("{HTTPS_DOMAIN}/accept/{}", id))?;
+        }
+        m.serialize_entry("actor", &self.actor)?;
+        m.serialize_entry("object", &self.object)?;
+        m.end()
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
