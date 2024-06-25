@@ -348,9 +348,15 @@ impl Serialize for MetadataActivity<'_> {
             }
         }
         m.serialize_entry("inbox", &inbox)?;
-        m.serialize_entry("outbox", &format_args!("{HTTPS_DOMAIN}/empty"))?;
-        m.serialize_entry("followers", &format_args!("{HTTPS_DOMAIN}/empty"))?;
-        m.serialize_entry("following", &format_args!("{HTTPS_DOMAIN}/empty"))?;
+        m.serialize_entry("outbox", &format_args!("{HTTPS_DOMAIN}/empty?outbox={id}"))?;
+        m.serialize_entry(
+            "followers",
+            &format_args!("{HTTPS_DOMAIN}/empty?followers={id}"),
+        )?;
+        m.serialize_entry(
+            "following",
+            &format_args!("{HTTPS_DOMAIN}/empty?following={id}"),
+        )?;
         m.serialize_entry("endpoints", &json!({ "sharedInbox": inbox }))?;
         m.serialize_entry(
             "url",

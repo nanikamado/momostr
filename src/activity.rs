@@ -361,6 +361,7 @@ pub enum ActivityForDeInner<'a> {
         #[serde(borrow)]
         object: Box<ActivityForDe<'a>>,
     },
+    #[serde(alias = "EmojiReact")]
     Like {
         object: Cow<'a, str>,
         content: Option<Cow<'a, str>>,

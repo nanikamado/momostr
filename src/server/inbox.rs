@@ -214,20 +214,26 @@ pub async fn http_post_inbox(
             let mut tags = vec![Tag::event(note.id), Tag::public_key(note.pubkey)];
             let mut content_converted = Cow::Borrowed("+");
             if let Some(content) = content {
-                let emoji = tag.iter().find_map(|t| {
-                    if let NoteTagForDe::Emoji { name, icon } = t {
-                        if name.as_ref() == content {
+                let shortcode = content.trim_matches(':').to_string();
+                let emoji = tag
+                    .iter()
+                    .find_map(|t| {
+                        if let NoteTagForDe::Emoji { name, icon } = t {
+                            Some((name, icon))
+                        } else {
+                            None
+                        }
+                    })
+                    .and_then(|(name, icon)| {
+                        if name.trim_matches(':') == shortcode {
                             Some(TagStandard::Emoji {
-                                shortcode: content.trim_matches(':').to_string(),
+                                shortcode,
                                 url: icon.url.clone().into(),
                             })
                         } else {
                             None
                         }
-                    } else {
-                        None
-                    }
-                });
+                    });
                 content_converted = content;
                 if let Some(e) = emoji {
                     tags.push(e.into());
