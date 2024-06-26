@@ -13,8 +13,7 @@ pub use crate::server::inbox::{event_tag, InternalApId};
 use crate::server::nodeinfo::well_known_nodeinfo;
 use crate::util::Merge;
 use crate::{
-    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS, RELAYS, RELAYS_EXTERNAL,
-    USER_AGENT, USER_ID_PREFIX,
+    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS, RELAYS_EXTERNAL, USER_ID_PREFIX,
 };
 use axum::extract::{Path, Query, Request, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -25,7 +24,6 @@ use cached::TimedSizedCache;
 use itertools::Itertools;
 use linkify::{LinkFinder, LinkKind};
 use lru::LruCache;
-use mediatype::ReadParams;
 use nodeinfo::nodeinfo;
 use nostr_lib::nips::nip19::Nip19Profile;
 use nostr_lib::{EventId, FromBech32, Metadata, PublicKey, ToBech32};
@@ -38,7 +36,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -185,47 +182,10 @@ pub async fn nostr_json(
     debug!("nostr.json?name={name}");
     let (name_decoded, host) = name.rsplit_once("_at_").ok_or_else(|| Error::NotFound)?;
     let host = host.replace(".at_", "at_");
-    #[derive(Deserialize, Debug)]
-    struct WebfingerResponse {
-        links: Vec<WebfingerLink>,
-    }
-    #[derive(Deserialize, Debug)]
-    struct WebfingerLink {
-        r#type: Option<mediatype::MediaTypeBuf>,
-        href: Option<String>,
-    }
-    let WebfingerResponse { links } = state
-        .http_client
-        .get(format!(
-            "https://{host}/.well-known/webfinger?resource=acct:{name_decoded}@{host}"
-        ))
-        .header(reqwest::header::USER_AGENT, &*USER_AGENT)
-        .send()
-        .await
-        .map_err(|e| Error::NotFoundWithMsg(e.to_string()))?
-        .json()
-        .await
-        .map_err(|e| Error::NotFoundWithMsg(e.to_string()))?;
-    let param_profile = mediatype::Name::new("profile").unwrap();
-    let value_activitystreams =
-        mediatype::Value::new("\"https://www.w3.org/ns/activitystreams\"").unwrap();
-    let id = links
-        .into_iter()
-        .find(|l| {
-            if let Some(t) = &l.r#type {
-                t.ty() == mediatype::names::APPLICATION
-                    && t.suffix() == Some(mediatype::names::JSON)
-                    && (t.subty() == mediatype::names::ACTIVITY
-                        || t.subty() == mediatype::names::LD
-                            && t.get_param(param_profile) == Some(value_activitystreams))
-            } else {
-                false
-            }
-        })
-        .ok_or(Error::NotFound)?
-        .href
-        .ok_or(Error::NotFound)?;
-    let (ActorOrProxied::Actor(actor), new) = state.get_actor_data_and_if_its_new(&id).await?
+    let id = state.get_ap_id_from_webfinger(name_decoded, &host).await?;
+    let (ActorOrProxied::Actor(actor), new) = state
+        .get_actor_data_and_if_its_new(&id, Some(name_decoded))
+        .await?
     else {
         return Err(Error::NotFound);
     };

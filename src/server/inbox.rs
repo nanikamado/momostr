@@ -330,7 +330,7 @@ pub async fn http_post_inbox(
         }
         ActivityForDeInner::Update { object } => {
             info!("update of actor");
-            state.update_actor_metadata(&object).await?;
+            state.update_actor_metadata(&object, None).await?;
         }
         ActivityForDeInner::Other(a) => {
             info!("not implemented {}", a);

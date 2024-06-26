@@ -570,13 +570,16 @@ impl AppState {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_actor_data(&self, id: &str) -> Result<ActorOrProxied, Error> {
-        self.get_actor_data_and_if_its_new(id).await.map(|(a, _)| a)
+        self.get_actor_data_and_if_its_new(id, None)
+            .await
+            .map(|(a, _)| a)
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn get_actor_data_and_if_its_new(
         &self,
         id: &str,
+        webfinger: Option<&str>,
     ) -> Result<(ActorOrProxied, bool), Error> {
         {
             if let Some(actor) = self.actor_cache.lock().get(id) {
@@ -594,114 +597,182 @@ impl AppState {
             .map_err(|e| {
                 Error::BadRequest(Some(format!("could not get user data from {id}: {e:?}")))
             })?;
-        let new = self.update_actor_metadata(&actor).await?;
+        let new = self.update_actor_metadata(&actor, webfinger).await?;
         self.actor_cache.lock().push(id.to_string(), actor.clone());
         Ok((actor, new))
     }
 
-    pub async fn update_actor_metadata(&self, actor: &ActorOrProxied) -> Result<bool, Error> {
+    pub async fn update_actor_metadata(
+        &self,
+        actor: &ActorOrProxied,
+        webfinger: Option<&str>,
+    ) -> Result<bool, Error> {
         static R: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[[:word:].-]+$").unwrap());
-        if let ActorOrProxied::Actor(actor) = &actor {
-            let nip05 = match (Url::parse(&actor.id)?.domain(), &actor.preferred_username) {
-                (Some(domain), Some(name)) if R.is_match(name) => Some(format!(
+        let ActorOrProxied::Actor(actor) = &actor else {
+            return Ok(false);
+        };
+        let nip05 = match (Url::parse(&actor.id)?.domain(), &actor.preferred_username) {
+            (Some(domain), Some(name)) if R.is_match(name) => {
+                let n = format!(
                     "{}_at_{}@momostr.pink",
                     name.to_lowercase(),
                     domain.replace("at_", ".at_")
-                )),
-                _ => None,
-            };
-            let key = nostr_lib::Keys::new(actor.nsec.clone());
-            let mut about = actor.summary.clone();
-            let mut first_property = true;
-            let mut lud16 = None;
-            use std::fmt::Write;
-            for a in &actor.property_values {
-                if (a.name == "⚡" || a.name == "⚡\u{fe0f}") && a.value.contains('@') {
-                    lud16 = Some(a.value.clone());
+                );
+                if webfinger == Some(name) {
+                    Some(n)
                 } else {
-                    if first_property {
-                        first_property = false;
-                        if about.is_none() {
-                            about = Some(String::new());
+                    match self.get_ap_id_from_webfinger(name, domain).await {
+                        Ok(id) => {
+                            if id == actor.id {
+                                Some(n)
+                            } else {
+                                warn!("preferred username is invalid: {}", actor.id);
+                                None
+                            }
                         }
-                        writeln!(&mut about.as_mut().unwrap(), "\n")?;
+                        Err(e) => {
+                            warn!("could not get ap id from webfinger: {e:?}");
+                            None
+                        }
                     }
-                    writeln!(&mut about.as_mut().unwrap(), "{}: {}", a.name, a.value)?;
                 }
             }
-            let metadata = EventBuilder::new(
-                nostr_lib::Kind::Metadata,
-                Metadata {
-                    name: Some(actor.name.clone()),
-                    about,
-                    website: Some(actor.url.clone().unwrap_or_else(|| actor.id.clone())),
-                    picture: actor.icon.clone(),
-                    banner: actor.image.clone(),
-                    nip05,
-                    lud16,
-                    ..Default::default()
+            _ => None,
+        };
+        let key = nostr_lib::Keys::new(actor.nsec.clone());
+        let mut about = actor.summary.clone();
+        let mut first_property = true;
+        let mut lud16 = None;
+        use std::fmt::Write;
+        for a in &actor.property_values {
+            if (a.name == "⚡" || a.name == "⚡\u{fe0f}") && a.value.contains('@') {
+                lud16 = Some(a.value.clone());
+            } else {
+                if first_property {
+                    first_property = false;
+                    if about.is_none() {
+                        about = Some(String::new());
+                    }
+                    writeln!(&mut about.as_mut().unwrap(), "\n")?;
                 }
-                .as_json(),
-                event_tag(
-                    actor.id.clone(),
-                    actor.tag.iter().filter_map(|t| match t {
-                        NoteTagForDe::Emoji { name, icon } => Some(
-                            nostr_lib::TagStandard::Emoji {
-                                shortcode: name.trim_matches(':').to_string(),
-                                url: icon.url.clone().into(),
-                            }
-                            .into(),
-                        ),
-                        NoteTagForDe::Hashtag { name } => Some(
-                            nostr_lib::TagStandard::Hashtag(
-                                name.strip_prefix('#').unwrap_or(name).to_string(),
-                            )
-                            .into(),
-                        ),
-                        _ => None,
-                    }),
-                ),
-            )
+                writeln!(&mut about.as_mut().unwrap(), "{}: {}", a.name, a.value)?;
+            }
+        }
+        let metadata = EventBuilder::new(
+            nostr_lib::Kind::Metadata,
+            Metadata {
+                name: Some(actor.name.clone()),
+                about,
+                website: Some(actor.url.clone().unwrap_or_else(|| actor.id.clone())),
+                picture: actor.icon.clone(),
+                banner: actor.image.clone(),
+                nip05,
+                lud16,
+                ..Default::default()
+            }
+            .as_json(),
+            event_tag(
+                actor.id.clone(),
+                actor.tag.iter().filter_map(|t| match t {
+                    NoteTagForDe::Emoji { name, icon } => Some(
+                        nostr_lib::TagStandard::Emoji {
+                            shortcode: name.trim_matches(':').to_string(),
+                            url: icon.url.clone().into(),
+                        }
+                        .into(),
+                    ),
+                    NoteTagForDe::Hashtag { name } => Some(
+                        nostr_lib::TagStandard::Hashtag(
+                            name.strip_prefix('#').unwrap_or(name).to_string(),
+                        )
+                        .into(),
+                    ),
+                    _ => None,
+                }),
+            ),
+        )
+        .to_event(&key)
+        .unwrap();
+        static MAIL_BOX: Lazy<Vec<(Url, Option<RelayMetadata>)>> = Lazy::new(|| {
+            OUTBOX_RELAYS
+                .iter()
+                .map(|r| {
+                    let marker = if INBOX_RELAYS.contains(r) {
+                        None
+                    } else {
+                        Some(RelayMetadata::Write)
+                    };
+                    (Url::parse(r).unwrap(), marker)
+                })
+                .chain(INBOX_RELAYS.iter().filter_map(|r| {
+                    if OUTBOX_RELAYS.contains(r) {
+                        None
+                    } else {
+                        Some((Url::parse(r).unwrap(), Some(RelayMetadata::Read)))
+                    }
+                }))
+                .collect()
+        });
+        let kind10002 = EventBuilder::relay_list(MAIL_BOX.clone())
             .to_event(&key)
             .unwrap();
-            static MAIL_BOX: Lazy<Vec<(Url, Option<RelayMetadata>)>> = Lazy::new(|| {
-                OUTBOX_RELAYS
-                    .iter()
-                    .map(|r| {
-                        let marker = if INBOX_RELAYS.contains(r) {
-                            None
-                        } else {
-                            Some(RelayMetadata::Write)
-                        };
-                        (Url::parse(r).unwrap(), marker)
-                    })
-                    .chain(INBOX_RELAYS.iter().filter_map(|r| {
-                        if OUTBOX_RELAYS.contains(r) {
-                            None
-                        } else {
-                            Some((Url::parse(r).unwrap(), Some(RelayMetadata::Read)))
-                        }
-                    }))
-                    .collect()
-            });
-            let kind10002 = EventBuilder::relay_list(MAIL_BOX.clone())
-                .to_event(&key)
-                .unwrap();
-            tokio::join!(
-                self.nostr
-                    .send(Arc::new(metadata), self.metadata_relays.clone()),
-                self.nostr
-                    .send(Arc::new(kind10002), self.metadata_relays.clone()),
-            );
-            let new = self.db.get_ap_id_of_npub(&actor.npub).is_none();
-            if new {
-                self.db
-                    .insert_ap_id_of_npub(&actor.npub, Arc::new(actor.id.clone()));
-            }
-            Ok(new)
-        } else {
-            Ok(false)
+        tokio::join!(
+            self.nostr
+                .send(Arc::new(metadata), self.metadata_relays.clone()),
+            self.nostr
+                .send(Arc::new(kind10002), self.metadata_relays.clone()),
+        );
+        let new = self.db.get_ap_id_of_npub(&actor.npub).is_none();
+        if new {
+            self.db
+                .insert_ap_id_of_npub(&actor.npub, Arc::new(actor.id.clone()));
         }
+        Ok(new)
+    }
+
+    pub async fn get_ap_id_from_webfinger(&self, name: &str, host: &str) -> Result<String, Error> {
+        #[derive(Deserialize, Debug)]
+        struct WebfingerResponse {
+            links: Vec<WebfingerLink>,
+        }
+        #[derive(Deserialize, Debug)]
+        struct WebfingerLink {
+            r#type: Option<mediatype::MediaTypeBuf>,
+            href: Option<String>,
+        }
+        let WebfingerResponse { links } = self
+            .http_client
+            .get(format!(
+                "https://{host}/.well-known/webfinger?resource=acct:{name}@{host}"
+            ))
+            .header(reqwest::header::USER_AGENT, &*USER_AGENT)
+            .send()
+            .await
+            .map_err(|e| Error::NotFoundWithMsg(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| Error::NotFoundWithMsg(e.to_string()))?;
+        let param_profile = mediatype::Name::new("profile").unwrap();
+        let value_activitystreams =
+            mediatype::Value::new("\"https://www.w3.org/ns/activitystreams\"").unwrap();
+        use mediatype::ReadParams;
+        let id = links
+            .into_iter()
+            .find(|l| {
+                if let Some(t) = &l.r#type {
+                    t.ty() == mediatype::names::APPLICATION
+                        && t.suffix() == Some(mediatype::names::JSON)
+                        && (t.subty() == mediatype::names::ACTIVITY
+                            || t.subty() == mediatype::names::LD
+                                && t.get_param(param_profile) == Some(value_activitystreams))
+                } else {
+                    false
+                }
+            })
+            .ok_or(Error::NotFound)?
+            .href
+            .ok_or(Error::NotFound)?;
+        Ok(id)
     }
 }
 
@@ -795,7 +866,6 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-#[serde(tag = "type", rename = "Person")]
 pub struct ActorForParse {
     public_key: PublicKeyJsonInner,
     endpoints: Option<EndPoints>,
