@@ -240,7 +240,7 @@ fn handle_event(
                     Err(GetProxiedEventError::NotProxiedEvent) => {
                         format!("{NOTE_ID_PREFIX}{}", e.to_bech32().unwrap())
                     }
-                    Err(GetProxiedEventError::ProxiedByOtherBried(_)) => {
+                    Err(GetProxiedEventError::ProxiedByOtherBridge(_)) => {
                         return;
                     }
                 };
@@ -358,7 +358,7 @@ fn handle_event(
                 let state = state.clone();
                 tokio::spawn(async move {
                     let e = match get_ap_id_from_id_of_proxied_event(&state, e).await {
-                        Ok(a) | Err(GetProxiedEventError::ProxiedByOtherBried(a)) => a,
+                        Ok(a) | Err(GetProxiedEventError::ProxiedByOtherBridge(a)) => a,
                         Err(GetProxiedEventError::NotProxiedEvent) => {
                             format!("{NOTE_ID_PREFIX}{}", e.to_bech32().unwrap())
                         }
@@ -582,7 +582,7 @@ async fn media<'a>(
             Segment::Event(event_id, s) => {
                 if quote.is_none() {
                     if let Some(e) = state.get_note(*event_id).await {
-                        if let Ok(url) | Err(GetProxiedEventError::ProxiedByOtherBried(url)) =
+                        if let Ok(url) | Err(GetProxiedEventError::ProxiedByOtherBridge(url)) =
                             get_ap_id_from_proxied_event(&e.event)
                         {
                             quote = Some(Quote {
@@ -625,7 +625,7 @@ async fn media<'a>(
             }
             Segment::Event(event_id, s) => {
                 match get_ap_id_from_id_of_proxied_event(state, *event_id).await {
-                    Ok(id) | Err(GetProxiedEventError::ProxiedByOtherBried(id)) => {
+                    Ok(id) | Err(GetProxiedEventError::ProxiedByOtherBridge(id)) => {
                         content.link(get_url_from_ap_id(state, &id).await.as_ref());
                     }
                     Err(_) => content.link(&format!("https://coracle.social/{s}")),
@@ -758,7 +758,7 @@ impl Content {
 
 enum GetProxiedEventError {
     NotProxiedEvent,
-    ProxiedByOtherBried(String),
+    ProxiedByOtherBridge(String),
 }
 
 #[tracing::instrument(skip_all)]
@@ -784,7 +784,7 @@ fn get_ap_id_from_proxied_event(event: &Event) -> Result<String, GetProxiedEvent
         if from_this_server {
             Ok(proxy)
         } else {
-            Err(GetProxiedEventError::ProxiedByOtherBried(proxy))
+            Err(GetProxiedEventError::ProxiedByOtherBridge(proxy))
         }
     } else {
         Err(GetProxiedEventError::NotProxiedEvent)
@@ -895,7 +895,7 @@ impl Note {
                 Err(GetProxiedEventError::NotProxiedEvent) => {
                     in_reply_to = Some(format!("{NOTE_ID_PREFIX}{}", e.to_bech32().unwrap()));
                 }
-                Err(GetProxiedEventError::ProxiedByOtherBried(_)) => {
+                Err(GetProxiedEventError::ProxiedByOtherBridge(_)) => {
                     info!(
                         "{} is proxied event from other bridge",
                         e.to_bech32().unwrap()

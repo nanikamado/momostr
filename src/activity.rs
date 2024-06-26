@@ -105,7 +105,7 @@ impl Serialize for Note {
                 "authoritative": true,
             })],
         )?;
-        // Pleroma does not accept notes with FEP-fffd style urls like this:
+        // Pleroma does not accept notes with FEP-fffd style url like this:
         // ```
         // m.serialize_entry(
         //     "url",
