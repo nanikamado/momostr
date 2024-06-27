@@ -26,7 +26,7 @@ async fn handle_command_from_nostr_account(
             state.db.stop_npub(author);
             "Stopped. \
                 Send `restart` to this bot \
-                if you want us to restart briding your account."
+                if you want us to restart bridging your account."
                 .to_string()
         }
     } else if command == "restart" {
@@ -63,7 +63,7 @@ async fn handle_command_from_nostr_account(
             .get_followers_of_nostr(author)
             .map_or(false, |a| !a.is_empty())
         {
-            "We are already briding your account.".to_string()
+            "We are already bridging your account.".to_string()
         } else {
             "We are currently not bridging your account because \
             you don't have any followers on the Fediverse. \
@@ -139,7 +139,7 @@ async fn handle_command_from_fediverse_account(
             state.db.restart_ap(id);
             "Restarted.".to_string()
         } else {
-            "We are already briding your account.".to_string()
+            "We are already bridging your account.".to_string()
         }
     } else {
         format!("Command `{command}` is not supported.")

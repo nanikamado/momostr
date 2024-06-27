@@ -191,14 +191,14 @@ impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
 
     pub async fn subscribe(
         &self,
-        fileters: Vec<Filter>,
+        filters: Vec<Filter>,
         relays: Arc<FxHashSet<RelayId>>,
     ) -> EventStream<RelayId> {
         let (tx, rx) = tokio::sync::mpsc::channel(1_000);
         let id = self.counter.fetch_add(1, atomic::Ordering::Relaxed);
-        let fileters = Arc::new(fileters);
+        let filters = Arc::new(filters);
         self.tx_for_filter_ops
-            .send(FilterOp::Subscribe(id, fileters, tx, relays))
+            .send(FilterOp::Subscribe(id, filters, tx, relays))
             .await
             .unwrap();
         EventStream {
@@ -212,11 +212,11 @@ impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
     pub async fn change_filter(
         &self,
         id: u32,
-        fileters: Vec<Filter>,
+        filters: Vec<Filter>,
         relays: Arc<FxHashSet<RelayId>>,
     ) {
         self.tx_for_filter_ops
-            .send(FilterOp::ChangeFilter(id, fileters, relays))
+            .send(FilterOp::ChangeFilter(id, filters, relays))
             .await
             .unwrap();
     }
@@ -260,8 +260,8 @@ struct SubscriptionState<RelayId> {
     filter_id_to_senders: FxHashMap<FilterId, FilterAndSenders<RelayId>>,
     id_pool: IdPool,
     broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<RelayId>>,
-    rate_limitter: RateLimitter,
-    event_rate_limitter: RateLimitter,
+    rate_limiter: RateLimiter,
+    event_rate_limiter: RateLimiter,
 }
 
 impl Display for FilterId {
@@ -294,8 +294,8 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
             filter_id_to_senders: Default::default(),
             id_pool: IdPool::new_ranged(0..u32::MAX),
             broadcast_sender,
-            rate_limitter: RateLimitter::new(50, Duration::from_secs(1)),
-            event_rate_limitter: RateLimitter::new(5, Duration::from_secs(1)),
+            rate_limiter: RateLimiter::new(50, Duration::from_secs(1)),
+            event_rate_limiter: RateLimiter::new(5, Duration::from_secs(1)),
         }
     }
 
@@ -322,7 +322,7 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
                         });
                     } else {
                         error!(
-                            "recieved event {} did not match the filter {}.",
+                            "received event {} did not match the filter {}.",
                             serde_json::to_string(&event).unwrap(),
                             serde_json::to_string(&f.filter).unwrap()
                         );
@@ -400,7 +400,7 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
     }
 
     async fn handle_filter_op(&mut self, op: FilterOp<RelayId>) {
-        self.rate_limitter.wait().await;
+        self.rate_limiter.wait().await;
         match op {
             FilterOp::Subscribe(id, filters, tx, relays) => {
                 self.sub(id, filters, tx, relays);
@@ -416,8 +416,8 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
     }
 
     async fn handle_send_event(&mut self, op: SendEvent<RelayId>) {
-        self.event_rate_limitter.wait().await;
-        self.rate_limitter.wait().await;
+        self.event_rate_limiter.wait().await;
+        self.rate_limiter.wait().await;
         broadcast(
             &self.broadcast_sender,
             RelayOp {
@@ -565,7 +565,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                 .await?;
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                warn!("{url} is too slow. skiped {n} ops.");
+                warn!("{url} is too slow. skipped {n} ops.");
             }
             Err(broadcast::error::RecvError::Closed) => return Ok(()),
         }
@@ -583,7 +583,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
-                            warn!("{url} is too slow. skiped {n} ops.");
+                            warn!("{url} is too slow. skipped {n} ops.");
                         }
                         Err(broadcast::error::RecvError::Closed) => return Ok(()),
                     }
@@ -619,7 +619,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                         .await?;
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        warn!("{url} is too slow. skiped {n} ops.");
+                        warn!("{url} is too slow. skipped {n} ops.");
                     }
                     Err(broadcast::error::RecvError::Closed) => return Ok(()),
                 }
@@ -814,14 +814,14 @@ impl Serialize for ClientMessage {
     }
 }
 
-struct RateLimitter {
+struct RateLimiter {
     count: u32,
     time: tokio::time::Instant,
     count_max: u32,
     duration: Duration,
 }
 
-impl RateLimitter {
+impl RateLimiter {
     fn new(count_max: u32, duration: Duration) -> Self {
         Self {
             count: 0,
