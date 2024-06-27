@@ -278,15 +278,6 @@ impl Serialize for MetadataActivity<'_> {
         S: serde::Serializer,
     {
         let npub = self.npub.to_bech32().unwrap();
-        let nprofile = Nip19Profile {
-            public_key: self.npub,
-            relays: RELAYS
-                .iter()
-                .filter_map(|s| nostr_lib::Url::from_str(s).ok())
-                .collect(),
-        }
-        .to_bech32()
-        .unwrap();
         let id = format!("{USER_ID_PREFIX}{npub}");
         let inbox = format!("{HTTPS_DOMAIN}/inbox");
         let mut m = serializer.serialize_map(None)?;
@@ -318,10 +309,6 @@ impl Serialize for MetadataActivity<'_> {
             &format_args!("{HTTPS_DOMAIN}/empty?following={id}"),
         )?;
         m.serialize_entry("endpoints", &json!({ "sharedInbox": inbox }))?;
-        m.serialize_entry(
-            "url",
-            &format_args!("https://coracle.social/people/{nprofile}"),
-        )?;
 
         // this format is not compatible with threads.net
         // m.serialize_entry(
