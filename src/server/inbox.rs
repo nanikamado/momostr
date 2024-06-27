@@ -490,11 +490,6 @@ static HEAD_MENTIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
     .unwrap()
 });
 
-static MENTION_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\[@(?<username>[[:word:].-]+)(?:@(?<domain>[[:word:].-]+))?\]\((?<url>[^)]+)\)")
-        .unwrap()
-});
-
 #[derive(Debug)]
 enum NostrConversionError {
     IsPrivate,
@@ -623,18 +618,17 @@ async fn get_event_from_note<'a>(
     } else {
         content
     };
-    let content = if MENTION_REGEX.is_match(content.as_ref()) {
-        let mut last_match = 0;
+    let content = if parser::mention(content.as_ref()).is_ok() {
         let mut c = String::with_capacity(content.len());
-        let content = content.as_ref();
-        for caps in MENTION_REGEX.captures_iter(content) {
-            let m = caps.get(0).unwrap();
-            let npub = if caps.name("domain").map_or(false, |d| d.as_str() == DOMAIN) {
-                PublicKey::from_bech32(caps.name("username").unwrap().as_str()).ok()
-            } else if let Ok(a) = state
-                .get_actor_data(caps.name("url").unwrap().as_str().trim_end())
-                .await
-            {
+        let mut content = content.as_ref();
+        while let Ok((skipped, m, r)) = parser::mention(content) {
+            let npub = if m.domain.map_or(false, |d| d == DOMAIN) {
+                PublicKey::from_bech32(m.username).ok()
+            } else if let Some(a) = if let Some(url) = m.url {
+                state.get_actor_data(url.trim_end()).await.ok()
+            } else {
+                None
+            } {
                 match a {
                     ActorOrProxied::Proxied(npub) => PublicKey::from_bech32(&*npub).ok(),
                     ActorOrProxied::Actor(actor) => Some(actor.npub),
@@ -643,23 +637,13 @@ async fn get_event_from_note<'a>(
                 None
             };
             if let Some(npub) = npub {
-                if last_match != 0
-                    && content[last_match..m.start()]
-                        .starts_with(|c: char| c.is_ascii_alphanumeric())
-                {
-                    c.write_char(' ').unwrap();
-                }
-                write!(
-                    &mut c,
-                    "{}nostr:{}",
-                    &content[last_match..m.start()],
-                    &npub.to_bech32().unwrap()
-                )
-                .unwrap();
-                last_match = m.end();
+                write!(&mut c, "{skipped}nostr:{}", &npub.to_bech32().unwrap()).unwrap();
+            } else {
+                write!(&mut c, "{}", &content[..content.len() - r.len()]).unwrap();
             }
+            content = r;
         }
-        c.write_str(&content[last_match..]).unwrap();
+        write!(&mut c, "{}", &content).unwrap();
         Cow::from(c)
     } else {
         content
