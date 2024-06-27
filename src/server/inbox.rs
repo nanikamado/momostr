@@ -6,8 +6,8 @@ use crate::activity::{
 use crate::error::Error;
 use crate::util::get_media_type;
 use crate::{
-    html_to_text, RelayId, CONTACT_LIST_LEN_LIMIT, DOMAIN, MAIN_RELAY, NOTE_ID_PREFIX, REVERSE_DNS,
-    USER_ID_PREFIX,
+    html_to_text, RelayId, BOT_PUB, CONTACT_LIST_LEN_LIMIT, DOMAIN, MAIN_RELAY, NOTE_ID_PREFIX,
+    REVERSE_DNS, USER_ID_PREFIX,
 };
 use axum::body::to_bytes;
 use axum::extract::{Request, State};
@@ -713,22 +713,28 @@ async fn get_event_from_note<'a>(
         return Err(NostrConversionError::IsPrivate);
     }
     if state.db.is_stopped_ap(&actor.id) {
-        let has_mention_to_nostr = tags.iter().any(|t| {
+        let mut has_mention_to_nostr = false;
+        let mut to_bot = false;
+        for t in &tags {
             if let Some(TagStandard::PublicKey {
                 public_key,
                 uppercase: false,
                 ..
             }) = t.as_standardized()
             {
-                state.db.get_ap_id_of_npub(public_key).is_none()
-            } else {
-                false
+                if public_key == &*BOT_PUB {
+                    to_bot = true;
+                } else if state.db.get_ap_id_of_npub(public_key).is_none() {
+                    has_mention_to_nostr = true;
+                }
             }
-        });
+        }
         if has_mention_to_nostr {
             // TODO: notify the author that their mention would not be bridged
         }
-        return Err(NostrConversionError::OptOutedAccount);
+        if !to_bot || !content.contains("restart") {
+            return Err(NostrConversionError::OptOutedAccount);
+        }
     }
     let event = EventBuilder::new(
         nostr_lib::Kind::TextNote,
