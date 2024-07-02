@@ -190,9 +190,12 @@ impl Serialize for DeleteForSer<'_> {
         let mut m = serializer.serialize_map(None)?;
         m.serialize_entry("type", "Delete")?;
         m.serialize_entry("id", &format_args!("{HTTPS_DOMAIN}/delete/{}", self.id))?;
-        m.serialize_entry("to", &["Public"])?;
+        m.serialize_entry("to", &[AS_PUBLIC])?;
         m.serialize_entry("actor", &self.actor)?;
-        m.serialize_entry("object", &format_args!("{NOTE_ID_PREFIX}{}", self.object))?;
+        m.serialize_entry(
+            "object",
+            &json!({"id":format_args!("{NOTE_ID_PREFIX}{}", self.object),"type":"Tombstone"}),
+        )?;
         m.end()
     }
 }
@@ -251,7 +254,7 @@ impl Serialize for AnnounceForSer<'_> {
         m.serialize_entry("id", &format_args!("{HTTPS_DOMAIN}/announce/{}", self.id))?;
         m.serialize_entry("actor", &self.actor)?;
         m.serialize_entry("object", &self.object)?;
-        m.serialize_entry("to", &["Public"])?;
+        m.serialize_entry("to", &[AS_PUBLIC])?;
         m.serialize_entry("published", &self.published)?;
         m.end()
     }
@@ -277,7 +280,7 @@ impl<M: Serialize> Serialize for UpdateForSer<'_, M> {
         m.serialize_entry("id", &format_args!("{HTTPS_DOMAIN}/update/{}", self.id))?;
         m.serialize_entry("actor", &self.actor)?;
         m.serialize_entry("object", &self.object)?;
-        m.serialize_entry("to", &["Public"])?;
+        m.serialize_entry("to", &[AS_PUBLIC])?;
         m.serialize_entry("published", &self.published)?;
         m.end()
     }
