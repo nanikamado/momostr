@@ -1,6 +1,7 @@
 use crate::activity::{
-    Actor, ActorOrProxied, AnnounceForSer, Attachment, CreateForSer, DeleteForSer, FollowActivity,
-    ImageForSe, Note, NoteForDe, NoteTagForSer, ReactionForSer, UndoFollowActivity, UpdateForSer,
+    activity_to_string, Actor, ActorOrProxied, AnnounceForSer, Attachment, CreateForSer,
+    DeleteForSer, FollowActivity, ImageForSe, Note, NoteForDe, NoteTagForSer, ReactionForSer,
+    UndoFollowActivity, UpdateForSer,
 };
 use crate::bot::{handle_dm_message_to_bot, handle_message_to_bot};
 use crate::error::Error;
@@ -30,20 +31,27 @@ use relay_pool::{EventStream, EventWithRelayId};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 use std::borrow::Cow;
-use std::fmt::Write;
+use std::fmt::{Debug, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
 
-async fn broadcast_to_actors<A: Serialize, S: AsRef<str>>(
+#[allow(clippy::mutable_key_type)]
+#[tracing::instrument(skip_all)]
+async fn broadcast_to_actors<A: Serialize, S: AsRef<str> + Debug>(
     state: &AppState,
     activity: A,
     author: &str,
     r: impl Iterator<Item = S>,
     to_relay: bool,
 ) -> FxHashSet<axum::http::Uri> {
-    #[allow(clippy::mutable_key_type)]
+    let r: Vec<_> = r.collect();
+    if r.is_empty() && !to_relay {
+        return FxHashSet::default();
+    }
+    debug!("broadcast_to_actors, r = {r:?}, to_relay = {to_relay}");
+    let body = activity_to_string(activity, author, true).await;
     let mut sent = FxHashSet::default();
     for actor_id in r {
         match state.get_actor_data(actor_id.as_ref()).await {
@@ -51,7 +59,10 @@ async fn broadcast_to_actors<A: Serialize, S: AsRef<str>>(
                 ActorOrProxied::Actor(actor) => {
                     if let Some(inbox) = &actor.inbox {
                         if sent.insert(inbox.clone()) {
-                            if let Err(e) = state.send_activity(inbox, author, &activity).await {
+                            if let Err(e) = state
+                                .send_string_activity(inbox, author, body.clone())
+                                .await
+                            {
                                 error!("could not send activity: {e:?}");
                             }
                         }
@@ -70,7 +81,10 @@ async fn broadcast_to_actors<A: Serialize, S: AsRef<str>>(
         for inbox in &*AP_RELAYS {
             let inbox = axum::http::Uri::from_str(inbox).unwrap();
             if sent.insert(inbox.clone()) {
-                if let Err(e) = state.send_activity(&inbox, author, &activity).await {
+                if let Err(e) = state
+                    .send_string_activity(&inbox, author, body.clone())
+                    .await
+                {
                     error!("could not send activity: {e:?}");
                 }
             }
@@ -297,20 +311,28 @@ fn handle_event(
                         let id = id.clone();
                         tokio::spawn(async move {
                             let inboxes = state.db.delete_event_id(event_id.as_bytes()).await;
-                            for i in inboxes {
-                                if let Err(e) = state
-                                    .send_activity(
-                                        &axum::http::Uri::from_str(&i).unwrap(),
-                                        &author,
-                                        &DeleteForSer {
-                                            actor: &author,
-                                            id: &id,
-                                            object: &event_id.to_bech32().unwrap(),
-                                        },
-                                    )
-                                    .await
-                                {
-                                    error!("could not send activity: {e:?}");
+                            if !inboxes.is_empty() {
+                                let body = activity_to_string(
+                                    &DeleteForSer {
+                                        actor: &author,
+                                        id: &id,
+                                        object: &event_id.to_bech32().unwrap(),
+                                    },
+                                    &author,
+                                    true,
+                                )
+                                .await;
+                                for i in inboxes {
+                                    if let Err(e) = state
+                                        .send_string_activity(
+                                            &axum::http::Uri::from_str(&i).unwrap(),
+                                            &author,
+                                            body.clone(),
+                                        )
+                                        .await
+                                    {
+                                        error!("could not send activity: {e:?}");
+                                    }
                                 }
                             }
                         });
@@ -1022,6 +1044,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                                 utf8_percent_encode(id, NON_ALPHANUMERIC)
                             )),
                         },
+                        false,
                     )
                     .await
                 {
@@ -1056,6 +1079,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                             actor: &author,
                             id: &format!("{HTTPS_DOMAIN}/unfollow/{author}/{escaped_id}"),
                         },
+                        false,
                     )
                     .await
                 {

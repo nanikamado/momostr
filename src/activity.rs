@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::rsa_keys::RSA_PRIVATE_KEY_FOR_SIGH;
+use crate::rsa_keys::{RSA_PRIVATE_KEY, RSA_PRIVATE_KEY_FOR_SIGH};
 use crate::server::{event_tag, AppState, WithContext};
 use crate::{
     html_to_text, HTTPS_DOMAIN, INBOX_RELAYS, KEY_ID, NOTE_ID_PREFIX, OUTBOX_RELAYS, SECRET_KEY,
@@ -8,11 +8,11 @@ use crate::{
 use axum::http::{Method, Request, Uri};
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use json_sign::{get_sign, RsaSignature};
 use nostr_lib::nips::nip65::RelayMetadata;
 use nostr_lib::{EventBuilder, JsonUtil, Metadata};
 use once_cell::sync::Lazy;
 use regex::Regex;
-use reqwest::header::HeaderMap;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -460,17 +460,56 @@ pub struct UndoFollowActivity<'a> {
     pub id: &'a str,
 }
 
+#[derive(Serialize)]
+pub struct WithSign<'a, A> {
+    #[serde(flatten)]
+    pub activity: A,
+    pub signature: RsaSignature<'a>,
+}
+
+pub async fn activity_to_string<A: Serialize, S: AsRef<str>>(
+    activity: A,
+    author: S,
+    sign: bool,
+) -> String {
+    let activity = WithContext(activity);
+    let body = serde_json::to_string(&activity).unwrap();
+    if !sign {
+        return body;
+    }
+    if let Some(signature) = get_sign(&body, &RSA_PRIVATE_KEY, author.as_ref()).await {
+        serde_json::to_string(&WithSign {
+            activity,
+            signature,
+        })
+        .unwrap()
+    } else {
+        tracing::error!("could not sing");
+        body
+    }
+}
+
 impl AppState {
+    #[tracing::instrument(skip_all)]
     pub async fn send_activity<S: AsRef<str>, A: Serialize>(
         &self,
         inbox: &Uri,
         author: S,
         activity: A,
+        sign: bool,
     ) -> Result<(), Error> {
-        let s = WithContext(activity);
+        let body = activity_to_string(activity, author.as_ref(), sign).await;
+        self.send_string_activity(inbox, author, body).await
+    }
+
+    pub async fn send_string_activity<S: AsRef<str>>(
+        &self,
+        inbox: &Uri,
+        author: S,
+        body: String,
+    ) -> Result<(), Error> {
         let host = inbox.host().unwrap();
-        let body = serde_json::to_string(&s).unwrap();
-        info!("{inbox} <== {body}");
+        info!("send_activity: {inbox} <== {body}");
         let digest = sha2::Sha256::digest(&body);
         let digest = base64::prelude::BASE64_STANDARD.encode(digest);
         let mut r = Request::builder()
@@ -492,23 +531,11 @@ impl AppState {
         SigningConfig::new(RsaSha256, &RSA_PRIVATE_KEY_FOR_SIGH, author.as_ref())
             .sign(&mut r)
             .unwrap();
-        let mut headers = HeaderMap::with_capacity(r.headers().len());
-        headers.extend(r.headers().into_iter().map(|(name, value)| {
-            let name = reqwest::header::HeaderName::from_bytes(name.as_ref()).unwrap();
-            let value = reqwest::header::HeaderValue::from_bytes(value.as_ref()).unwrap();
-            (name, value)
-        }));
-        let r = self
-            .http_client
-            .post(&inbox.to_string())
-            .headers(headers)
-            .body(r.into_body())
-            .send()
-            .await?;
+        let r = reqwest::Request::try_from(r)?;
+        let r = self.http_client.execute(r).await?;
         info!(
-            "{inbox} ==> status: {}, headers: {:?}, body: {:?}",
+            "send_activity response: {inbox} ==> status: {}, body: {:?}",
             r.status(),
-            r.headers().clone(),
             r.text().await
         );
         Ok(())

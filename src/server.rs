@@ -248,10 +248,28 @@ impl<T: Serialize> Serialize for WithContext<T> {
                 let mut m = serializer.serialize_map(Some(1))?;
                 m.serialize_entry(
                     "@context",
-                    &[
+                    &json!([
                         "https://www.w3.org/ns/activitystreams",
                         "https://w3id.org/security/v1",
-                    ],
+                        {
+                            "Key": "sec:Key",
+                            "sensitive": "as:sensitive",
+                            "Hashtag": "as:Hashtag",
+                            "quoteUrl": "as:quoteUrl",
+                            "toot": "http://joinmastodon.org/ns#",
+                            "Emoji": "toot:Emoji",
+                            "discoverable": "toot:discoverable",
+                            "misskey": "https://misskey-hub.net/ns#",
+                            "_misskey_content": "misskey:_misskey_content",
+                            "_misskey_quote": "misskey:_misskey_quote",
+                            "_misskey_reaction": "misskey:_misskey_reaction",
+                            "fep": "https://w3id.org/fep/",
+                            "proxyOf": "fep:fffd/proxyOf",
+                            "protocol": "fep:fffd/protocol",
+                            "proxied": "fep:fffd/proxied",
+                            "authoritative": "fep:fffd/authoritative",
+                        }
+                    ]),
                 )?;
                 m.end()
             }

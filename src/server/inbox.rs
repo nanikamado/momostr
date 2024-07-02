@@ -92,6 +92,7 @@ pub async fn http_post_inbox(
                                     id: id.as_deref(),
                                 },
                             },
+                            false,
                         )
                         .await;
                 }
