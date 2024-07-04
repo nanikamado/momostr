@@ -5,7 +5,7 @@ use crate::{
     html_to_text, HTTPS_DOMAIN, INBOX_RELAYS, KEY_ID, NOTE_ID_PREFIX, OUTBOX_RELAYS, SECRET_KEY,
     USER_AGENT, USER_ID_PREFIX,
 };
-use axum::http::{Method, Request, Uri};
+use axum::http::{Method, Request};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use json_sign::{get_sign, RsaSignature};
@@ -493,7 +493,7 @@ impl AppState {
     #[tracing::instrument(skip_all)]
     pub async fn send_activity<S: AsRef<str>, A: Serialize>(
         &self,
-        inbox: &Uri,
+        inbox: &Url,
         author: S,
         activity: A,
         sign: bool,
@@ -504,7 +504,7 @@ impl AppState {
 
     pub async fn send_string_activity<S: AsRef<str>>(
         &self,
-        inbox: &Uri,
+        inbox: &Url,
         author: S,
         body: String,
     ) -> Result<(), Error> {
@@ -514,13 +514,13 @@ impl AppState {
         let digest = base64::prelude::BASE64_STANDARD.encode(digest);
         let mut r = Request::builder()
             .method(Method::POST)
-            .uri(inbox)
+            .uri(inbox.as_str())
             .header(
                 axum::http::header::CONTENT_TYPE,
                 "application/activity+json",
             )
             .header(axum::http::header::USER_AGENT, &*USER_AGENT)
-            .header("host", host)
+            .header("host", host.to_string())
             .header(
                 "date",
                 httpdate::HttpDate::from(std::time::SystemTime::now()).to_string(),
@@ -541,15 +541,15 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn get_activity_json<T: DeserializeOwned>(&self, url: &Uri) -> Result<T, Error> {
+    pub async fn get_activity_json<T: DeserializeOwned>(&self, url: &Url) -> Result<T, Error> {
         let digest = sha2::Sha256::digest([]);
         let digest = base64::prelude::BASE64_STANDARD.encode(digest);
         let mut r = Request::builder()
             .method(Method::GET)
-            .uri(url)
+            .uri(url.as_str())
             .header(axum::http::header::ACCEPT, "application/activity+json")
             .header(axum::http::header::USER_AGENT, &*USER_AGENT)
-            .header("host", url.host().unwrap())
+            .header("host", url.host().unwrap().to_string())
             .header(
                 "date",
                 httpdate::HttpDate::from(std::time::SystemTime::now()).to_string(),
@@ -576,7 +576,7 @@ impl AppState {
 
     pub async fn get_activity_json_with_retry<T: DeserializeOwned>(
         &self,
-        url: &Uri,
+        url: &Url,
     ) -> Result<T, Error> {
         match self.get_activity_json(url).await {
             Ok(actor) => Ok(actor),
@@ -622,7 +622,7 @@ impl AppState {
             return Ok((actor, false));
         }
         let actor: ActorOrProxied = self
-            .get_activity_json_with_retry(&id.parse::<Uri>().unwrap())
+            .get_activity_json_with_retry(&id.parse::<Url>()?)
             .await
             .map_err(|e| {
                 Error::BadRequest(Some(format!("could not get user data from {id}: {e:?}")))
@@ -815,7 +815,7 @@ pub enum ActorOrProxied {
 #[derive(Debug)]
 pub struct Actor {
     pub public_key: sigh::PublicKey,
-    pub inbox: Option<Uri>,
+    pub inbox: Option<Url>,
     pub summary: Option<String>,
     pub icon: Option<String>,
     pub image: Option<String>,
@@ -860,11 +860,7 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
         } else {
             Ok(ActorOrProxied::Actor(Arc::new(Actor {
                 public_key: a.public_key.public_key_pem,
-                inbox: a
-                    .endpoints
-                    .and_then(|a| a.shared_inbox)
-                    .or(a.inbox)
-                    .and_then(|i| i.try_into().ok()),
+                inbox: a.endpoints.and_then(|a| a.shared_inbox).or(a.inbox),
                 summary,
                 icon: a.icon.and_then(|a| a.get_first().map(|a| a.url)),
                 image: a.image.and_then(|a| a.get_first().map(|a| a.url)),
@@ -899,7 +895,7 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
 pub struct ActorForParse {
     public_key: PublicKeyJsonInner,
     endpoints: Option<EndPoints>,
-    inbox: Option<String>,
+    inbox: Option<Url>,
     summary: Option<String>,
     icon: Option<ListOrSingle<UrlStruct>>,
     image: Option<ListOrSingle<UrlStruct>>,
@@ -1084,7 +1080,7 @@ where
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct EndPoints {
-    shared_inbox: Option<String>,
+    shared_inbox: Option<Url>,
 }
 
 #[cfg(test)]

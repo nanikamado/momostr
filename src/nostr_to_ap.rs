@@ -36,6 +36,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
+use url::Url;
 
 #[allow(clippy::mutable_key_type)]
 #[tracing::instrument(skip_all)]
@@ -45,7 +46,7 @@ async fn broadcast_to_actors<A: Serialize, S: AsRef<str> + Debug>(
     author: &str,
     r: impl Iterator<Item = S>,
     to_relay: bool,
-) -> FxHashSet<axum::http::Uri> {
+) -> FxHashSet<Url> {
     let r: Vec<_> = r.collect();
     if r.is_empty() && !to_relay {
         return FxHashSet::default();
@@ -79,7 +80,7 @@ async fn broadcast_to_actors<A: Serialize, S: AsRef<str> + Debug>(
     }
     if to_relay {
         for inbox in &*AP_RELAYS {
-            let inbox = axum::http::Uri::from_str(inbox).unwrap();
+            let inbox = Url::from_str(inbox).unwrap();
             if sent.insert(inbox.clone()) {
                 if let Err(e) = state
                     .send_string_activity(&inbox, author, body.clone())
@@ -323,13 +324,8 @@ fn handle_event(
                                 )
                                 .await;
                                 for i in inboxes {
-                                    if let Err(e) = state
-                                        .send_string_activity(
-                                            &axum::http::Uri::from_str(&i).unwrap(),
-                                            &author,
-                                            body.clone(),
-                                        )
-                                        .await
+                                    if let Err(e) =
+                                        state.send_string_activity(&i, &author, body.clone()).await
                                     {
                                         error!("could not send activity: {e:?}");
                                     }
@@ -684,7 +680,7 @@ async fn media<'a>(
 
 async fn get_url_from_ap_id<'a>(state: &AppState, id: &'a str) -> Cow<'a, str> {
     async fn get_url_from_ap_id_aux(state: &AppState, id: &str) -> Option<String> {
-        let id = id.parse::<axum::http::Uri>().ok()?;
+        let id = id.parse::<Url>().ok()?;
         let note = state
             .get_activity_json_with_retry::<NoteForDe>(&id)
             .await
@@ -975,7 +971,7 @@ async fn get_ap_id_and_handle_from_public_key(
                         format!(
                             "@{}@{}",
                             a.preferred_username.as_ref().unwrap_or(&a.name),
-                            axum::http::Uri::from_str(&a.id).ok()?.host()?
+                            Url::from_str(&a.id).ok()?.host()?
                         ),
                     ));
                 }

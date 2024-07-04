@@ -11,7 +11,6 @@ use crate::{
 };
 use axum::body::to_bytes;
 use axum::extract::{Request, State};
-use axum::http::uri;
 use axum_macros::debug_handler;
 use itertools::Itertools;
 use nostr_lib::nips::nip10::Marker;
@@ -27,6 +26,7 @@ use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{debug, error, info, trace};
+use url::Url;
 
 #[debug_handler]
 #[tracing::instrument(skip_all)]
@@ -353,11 +353,11 @@ impl<'a> InternalApId<'a> {
     }
 
     fn get(ap_id: Cow<'a, str>, actor_id: &str) -> Result<InternalApId<'a>, Error> {
-        let actor_id = uri::Uri::from_str(actor_id)?;
+        let actor_id = Url::from_str(actor_id)?;
         let host = actor_id
             .host()
             .ok_or_else(|| Error::BadRequest(Some("actor id is not a url".to_string())))?;
-        if uri::Uri::from_str(ap_id.as_ref())
+        if Url::from_str(ap_id.as_ref())
             .ok()
             .and_then(|url| url.host().map(|a| a == host))
             .unwrap_or(false)
@@ -439,7 +439,10 @@ async fn get_event_from_object_id<'a>(
         }
     }
     let note: NoteForDe = state
-        .get_activity_json_with_retry(&url.parse::<uri::Uri>().unwrap())
+        .get_activity_json_with_retry(
+            &url.parse::<Url>()
+                .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?,
+        )
         .await
         .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?;
     if let Some(event_id) = &note.url.proxied_from {

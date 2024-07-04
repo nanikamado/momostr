@@ -10,6 +10,7 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
+use url::Url;
 
 #[derive(Debug)]
 pub struct Db {
@@ -124,7 +125,7 @@ impl Db {
             .unwrap();
     }
 
-    pub async fn delete_event_id(&self, event_id: &[u8]) -> Vec<String> {
+    pub async fn delete_event_id(&self, event_id: &[u8]) -> Vec<Url> {
         match self.event_id_to_inboxes.get(event_id).unwrap() {
             Some(ids) => {
                 let ids: Vec<u32> = rmp_serde::from_slice(&ids).unwrap();
@@ -133,6 +134,8 @@ impl Db {
                     .skip(1)
                     .map(|i: u32| {
                         String::from_utf8(self.id_to_inbox.get(i.to_be_bytes()).unwrap().unwrap())
+                            .unwrap()
+                            .parse()
                             .unwrap()
                     })
                     .collect();
