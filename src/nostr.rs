@@ -17,7 +17,7 @@ use tracing::debug;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum NostrUser {
-    // TODO: distinguish user proxied by other bridge to prevent dupulication
+    // TODO: distinguish user proxied by other bridge to prevent duplication
     // of replies
     Proxied(String),
     Metadata(Metadata),
@@ -77,27 +77,27 @@ pub async fn get_nostr_user_data_without_cache(
         let metadata = Metadata::from_json(&e.event.content).map_err(|_| Error::NotFound)?;
         let state = state.clone();
         tokio::spawn(async move {
-            let mut outdated_metadatas = Vec::new();
+            let mut outdated_metadata = Vec::new();
             let dead_line = Instant::now() + Duration::from_secs(10);
             while let Ok(Some(new_e)) = timeout_at(dead_line, sub.next()).await {
                 match new_e.event.created_at.cmp(&e.event.created_at) {
                     std::cmp::Ordering::Less => {
-                        outdated_metadatas.push(new_e);
+                        outdated_metadata.push(new_e);
                     }
                     std::cmp::Ordering::Greater => {
-                        outdated_metadatas.push(e);
+                        outdated_metadata.push(e);
                         e = new_e;
                     }
                     std::cmp::Ordering::Equal => (),
                 }
             }
-            if !outdated_metadatas.is_empty() {
+            if !outdated_metadata.is_empty() {
                 if let Ok(metadata) = Metadata::from_json(&e.event.content) {
                     state
                         .nostr
                         .send(
                             e.event,
-                            Arc::new(outdated_metadatas.into_iter().map(|m| m.relay_id).collect()),
+                            Arc::new(outdated_metadata.into_iter().map(|m| m.relay_id).collect()),
                         )
                         .await;
                     state.nostr_user_cache.lock().cache_set(
@@ -136,13 +136,10 @@ impl AppState {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn subscribe_filter(
-        &self,
-        fileters: Vec<Filter>,
-    ) -> relay_pool::EventStream<RelayId> {
-        debug!("filter = {}", serde_json::to_string(&fileters).unwrap());
+    pub async fn subscribe_filter(&self, filters: Vec<Filter>) -> relay_pool::EventStream<RelayId> {
+        debug!("filter = {}", serde_json::to_string(&filters).unwrap());
         self.nostr
-            .subscribe(fileters, self.main_relays.clone())
+            .subscribe(filters, self.main_relays.clone())
             .await
     }
 
