@@ -1102,6 +1102,7 @@ mod tests {
     use crate::db::Db;
     use crate::event_deletion_queue::EventDeletionQueue;
     use crate::server::AppState;
+    use crate::util::RateLimiter;
     use crate::{RelayId, NOTE_ID_PREFIX, USER_AGENT};
     use cached::TimedSizedCache;
     use itertools::Itertools;
@@ -1114,6 +1115,7 @@ mod tests {
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::num::NonZeroUsize;
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::runtime::Runtime;
 
     static RT: Lazy<Runtime> = Lazy::new(|| {
@@ -1153,6 +1155,11 @@ mod tests {
 
                 Arc::new(AppState {
                     nostr,
+                    nostr_send_rate: Mutex::new(RateLimiter::new(u32::MAX, Duration::from_secs(0))),
+                    nostr_subscribe_rate: Mutex::new(RateLimiter::new(
+                        u32::MAX,
+                        Duration::from_secs(0),
+                    )),
                     relay_url: relays.into_iter().map(|a| a.to_string()).collect(),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),

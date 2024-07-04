@@ -260,8 +260,6 @@ struct SubscriptionState<RelayId> {
     filter_id_to_senders: FxHashMap<FilterId, FilterAndSenders<RelayId>>,
     id_pool: IdPool,
     broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<RelayId>>,
-    rate_limiter: RateLimiter,
-    event_rate_limiter: RateLimiter,
 }
 
 impl Display for FilterId {
@@ -294,8 +292,6 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
             filter_id_to_senders: Default::default(),
             id_pool: IdPool::new_ranged(0..u32::MAX),
             broadcast_sender,
-            rate_limiter: RateLimiter::new(50, Duration::from_secs(1)),
-            event_rate_limiter: RateLimiter::new(5, Duration::from_secs(1)),
         }
     }
 
@@ -400,7 +396,6 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
     }
 
     async fn handle_filter_op(&mut self, op: FilterOp<RelayId>) {
-        self.rate_limiter.wait().await;
         match op {
             FilterOp::Subscribe(id, filters, tx, relays) => {
                 self.sub(id, filters, tx, relays);
@@ -416,8 +411,6 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
     }
 
     async fn handle_send_event(&mut self, op: SendEvent<RelayId>) {
-        self.event_rate_limiter.wait().await;
-        self.rate_limiter.wait().await;
         broadcast(
             &self.broadcast_sender,
             RelayOp {
@@ -810,42 +803,6 @@ impl Serialize for ClientMessage {
                 seq.serialize_element(id)?;
                 seq.end()
             }
-        }
-    }
-}
-
-struct RateLimiter {
-    count: u32,
-    time: tokio::time::Instant,
-    count_max: u32,
-    duration: Duration,
-}
-
-impl RateLimiter {
-    fn new(count_max: u32, duration: Duration) -> Self {
-        Self {
-            count: 0,
-            time: tokio::time::Instant::now(),
-            count_max,
-            duration,
-        }
-    }
-
-    async fn wait(&mut self) {
-        if self.count >= self.count_max {
-            self.count = 0;
-            info!(
-                "self.time = {:?}, now = {:?}",
-                self.time,
-                tokio::time::Instant::now()
-            );
-            if self.time > tokio::time::Instant::now() {
-                error!("rate limit reached");
-                tokio::time::sleep_until(self.time).await;
-            }
-            self.time = tokio::time::Instant::now() + self.duration;
-        } else {
-            self.count += 1;
         }
     }
 }

@@ -29,6 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use util::RateLimiter;
 
 const DOMAIN: &str = env!("DOMAIN");
 static REVERSE_DNS: Lazy<String> = Lazy::new(|| DOMAIN.split('.').rev().join("."));
@@ -143,6 +144,8 @@ async fn run() {
     let http_client = reqwest::Client::new();
     let state = Arc::new(AppState {
         nostr,
+        nostr_send_rate: Mutex::new(RateLimiter::new(5, Duration::from_secs(1))),
+        nostr_subscribe_rate: Mutex::new(RateLimiter::new(50, Duration::from_secs(1))),
         relay_url: RELAYS_EXTERNAL.iter().map(|a| a.to_string()).collect(),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),

@@ -11,7 +11,7 @@ use crate::rsa_keys::RSA_PUBLIC_KEY_STRING;
 use crate::server::inbox::http_post_inbox;
 pub use crate::server::inbox::{event_tag, InternalApId};
 use crate::server::nodeinfo::well_known_nodeinfo;
-use crate::util::Merge;
+use crate::util::{Merge, RateLimiter};
 use crate::{
     RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS, RELAYS_EXTERNAL, USER_ID_PREFIX,
 };
@@ -46,6 +46,8 @@ type LazyUser = Arc<tokio::sync::OnceCell<Arc<Result<NostrUser, Error>>>>;
 #[derive(Debug)]
 pub struct AppState {
     pub nostr: RelayPool<RelayId>,
+    pub nostr_send_rate: Mutex<RateLimiter>,
+    pub nostr_subscribe_rate: Mutex<RateLimiter>,
     pub http_client: reqwest::Client,
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,

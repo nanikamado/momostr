@@ -138,12 +138,16 @@ impl AppState {
     #[tracing::instrument(skip_all)]
     pub async fn subscribe_filter(&self, filters: Vec<Filter>) -> relay_pool::EventStream<RelayId> {
         debug!("filter = {}", serde_json::to_string(&filters).unwrap());
+        let w = self.nostr_subscribe_rate.lock().wait();
+        w.await;
         self.nostr
             .subscribe(filters, self.main_relays.clone())
             .await
     }
 
     pub async fn nostr_send(&self, event: Arc<Event>) {
+        let s = self.nostr_send_rate.lock().wait();
+        s.await;
         self.nostr.send(event, self.main_relays.clone()).await
     }
 
