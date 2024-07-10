@@ -61,11 +61,11 @@ async fn delete_async(
         .json()
         .await?;
     let mut m: FxHashMap<_, (_, FxHashSet<_>)> = FxHashMap::default();
-    for (evnet_id, nsec) in es {
+    for (event_id, nsec) in es {
         m.entry(*nsec.as_ref())
             .or_insert((nsec, FxHashSet::default()))
             .1
-            .insert(evnet_id);
+            .insert(event_id);
     }
     let es = m
         .into_iter()
