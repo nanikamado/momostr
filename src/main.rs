@@ -22,7 +22,7 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
 use relay_pool::RelayPool;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use server::{listen, AppState};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -39,12 +39,6 @@ const USER_ID_PREFIX: &str = env!("USER_ID_PREFIX");
 const BIND_ADDRESS: &str = env!("BIND_ADDRESS");
 const SECRET_KEY: &str = env!("SECRET_KEY");
 const STACK_SIZE: usize = 8 * 1024 * 1024;
-static RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
-    env!("MAIN_RELAYS")
-        .split(',')
-        .filter(|a| !a.is_empty())
-        .collect_vec()
-});
 static RELAYS_EXTERNAL: Lazy<Vec<&str>> = Lazy::new(|| {
     env!("EXTERNAL_MAIN_RELAYS")
         .split(',')
@@ -59,6 +53,18 @@ static INBOX_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
 });
 static OUTBOX_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
     env!("OUTBOX_RELAYS")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
+static INBOX_RELAYS_FOR_10002: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("INBOX_RELAYS_FOR_10002")
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
+static OUTBOX_RELAYS_FOR_10002: Lazy<Vec<&str>> = Lazy::new(|| {
+    env!("OUTBOX_RELAYS_FOR_10002")
         .split(',')
         .filter(|a| !a.is_empty())
         .collect_vec()
@@ -112,35 +118,47 @@ fn main() {
         .block_on(run())
 }
 
+async fn relay_to_id(
+    nostr: &RelayPool<RelayId>,
+    url: &str,
+    relay_to_id_map: &mut FxHashMap<url::Url, RelayId>,
+) -> RelayId {
+    let l = url::Url::parse(url).unwrap();
+    if let Some(id) = relay_to_id_map.get(&l) {
+        *id
+    } else {
+        let id = RelayId(relay_to_id_map.len() as u32);
+        relay_to_id_map.insert(l.clone(), id);
+        nostr.add_relay(id, l).await.unwrap();
+        id
+    }
+}
+
 async fn run() {
     let db = Db::new().await;
     let nostr = RelayPool::new(USER_AGENT.to_string()).await;
-    for (i, l) in RELAYS.iter().enumerate() {
+    let mut relay_to_id_map = FxHashMap::default();
+    for (i, l) in INBOX_RELAYS.iter().chain(OUTBOX_RELAYS.iter()).enumerate() {
         nostr
             .add_relay(RelayId(i as u32), url::Url::parse(l).unwrap())
             .await
             .unwrap();
     }
-    let main_relays: Arc<FxHashSet<RelayId>> =
-        Arc::new((0..RELAYS.len()).map(|a| RelayId(a as u32)).collect());
-    let mut relay_count = RELAYS.len();
-    let mut metadata_relays = FxHashSet::default();
-    for mr in &*METADATA_RELAYS {
-        let i = if let Some(i) = RELAYS.iter().position(|r| r == mr) {
-            RelayId(i as u32)
-        } else {
-            let i = RelayId(relay_count as u32);
-            nostr
-                .add_relay(i, url::Url::parse(mr).unwrap())
-                .await
-                .unwrap();
-            relay_count += 1;
-            i
-        };
-        metadata_relays.insert(i);
+    let mut inbox_relays = FxHashSet::default();
+    for l in &*INBOX_RELAYS {
+        inbox_relays.insert(relay_to_id(&nostr, l, &mut relay_to_id_map).await);
     }
+    let mut outbox_relays = FxHashSet::default();
+    for l in &*OUTBOX_RELAYS {
+        outbox_relays.insert(relay_to_id(&nostr, l, &mut relay_to_id_map).await);
+    }
+    let mut metadata_relays = FxHashSet::default();
+    for l in &*METADATA_RELAYS {
+        metadata_relays.insert(relay_to_id(&nostr, l, &mut relay_to_id_map).await);
+    }
+    let inbox_relays: Arc<FxHashSet<RelayId>> = Arc::new(inbox_relays);
     let filter = get_filter();
-    let event_stream = nostr.subscribe(filter, main_relays.clone()).await;
+    let event_stream = nostr.subscribe(filter, inbox_relays.clone()).await;
     let http_client = reqwest::Client::new();
     let state = Arc::new(AppState {
         nostr,
@@ -152,7 +170,8 @@ async fn run() {
         actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         nostr_user_cache: Mutex::new(TimedSizedCache::with_size_and_lifespan(1_000, 60 * 10)),
         db,
-        main_relays,
+        inbox_relays,
+        outbox_relays: Arc::new(outbox_relays),
         metadata_relays: Arc::new(metadata_relays),
         event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
     });

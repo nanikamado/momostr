@@ -13,7 +13,8 @@ pub use crate::server::inbox::{event_tag, InternalApId};
 use crate::server::nodeinfo::well_known_nodeinfo;
 use crate::util::{Merge, RateLimiter};
 use crate::{
-    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS, RELAYS_EXTERNAL, USER_ID_PREFIX,
+    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS_FOR_10002, RELAYS_EXTERNAL,
+    USER_ID_PREFIX,
 };
 use axum::extract::{Path, Query, Request, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -53,7 +54,8 @@ pub struct AppState {
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,
     pub nostr_user_cache: Mutex<TimedSizedCache<nostr_lib::PublicKey, LazyUser>>,
     pub relay_url: Vec<String>,
-    pub main_relays: Arc<FxHashSet<RelayId>>,
+    pub inbox_relays: Arc<FxHashSet<RelayId>>,
+    pub outbox_relays: Arc<FxHashSet<RelayId>>,
     pub metadata_relays: Arc<FxHashSet<RelayId>>,
     pub event_deletion_queue: EventDeletionQueue,
     pub db: Db,
@@ -199,7 +201,7 @@ pub async fn nostr_json(
             name: actor.npub,
         },
         "relays": {
-            actor.npub.to_string(): &*OUTBOX_RELAYS,
+            actor.npub.to_string(): &*OUTBOX_RELAYS_FOR_10002,
         }
     }))
     .into_response();

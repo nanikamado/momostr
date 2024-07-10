@@ -9,8 +9,8 @@ use crate::nostr::{get_nostr_user_data, NostrUser};
 use crate::server::{metadata_to_activity, AppState};
 use crate::util::get_media_type;
 use crate::{
-    RelayId, AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG, OUTBOX_RELAYS,
-    REVERSE_DNS, USER_ID_PREFIX,
+    RelayId, AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG,
+    OUTBOX_RELAYS_FOR_10002, REVERSE_DNS, USER_ID_PREFIX,
 };
 use futures_util::StreamExt;
 use html_escape::{encode_double_quoted_attribute, encode_text};
@@ -929,7 +929,10 @@ impl Note {
         let nevent = Nip19Event {
             event_id: event.id,
             author: None,
-            relays: OUTBOX_RELAYS.iter().map(|s| s.to_string()).collect(),
+            relays: OUTBOX_RELAYS_FOR_10002
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         }
         .to_bech32()
         .unwrap();
@@ -1136,17 +1139,17 @@ mod tests {
                 //     .with(tracing_subscriber::fmt::layer())
                 //     .init();
 
-                let relays = ["wss://relay.nostr.band", "wss://relay.momostr.pink"]
+                let relay_url = ["wss://relay.nostr.band", "wss://relay.momostr.pink"]
                     .iter()
                     .map(|l| url::Url::parse(l).unwrap())
                     .collect_vec();
                 let nostr = RelayPool::new(USER_AGENT.to_string()).await;
-                let mut main_relays = FxHashSet::default();
-                for (i, l) in relays.iter().enumerate() {
+                let mut relays = FxHashSet::default();
+                for (i, l) in relay_url.iter().enumerate() {
                     nostr.add_relay(RelayId(i as u32), l.clone()).await.unwrap();
-                    main_relays.insert(RelayId(i as u32));
+                    relays.insert(RelayId(i as u32));
                 }
-                let main_relays = Arc::new(main_relays);
+                let relays = Arc::new(relays);
                 let http_client = reqwest::Client::new();
 
                 Arc::new(AppState {
@@ -1156,7 +1159,7 @@ mod tests {
                         u32::MAX,
                         Duration::from_secs(0),
                     )),
-                    relay_url: relays.into_iter().map(|a| a.to_string()).collect(),
+                    relay_url: relay_url.into_iter().map(|a| a.to_string()).collect(),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
                     actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
@@ -1165,8 +1168,9 @@ mod tests {
                         60 * 10,
                     )),
                     db: Db::new().await,
-                    metadata_relays: main_relays.clone(),
-                    main_relays,
+                    metadata_relays: relays.clone(),
+                    inbox_relays: relays.clone(),
+                    outbox_relays: relays,
                     event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
                 })
             })

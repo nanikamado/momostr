@@ -141,14 +141,14 @@ impl AppState {
         let w = self.nostr_subscribe_rate.lock().wait();
         w.await;
         self.nostr
-            .subscribe(filters, self.main_relays.clone())
+            .subscribe(filters, self.inbox_relays.clone())
             .await
     }
 
     pub async fn nostr_send(&self, event: Arc<Event>) {
         let s = self.nostr_send_rate.lock().wait();
         s.await;
-        self.nostr.send(event, self.main_relays.clone()).await
+        self.nostr.send(event, self.outbox_relays.clone()).await
     }
 
     #[tracing::instrument(skip_all)]

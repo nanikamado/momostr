@@ -2,8 +2,8 @@ use crate::error::Error;
 use crate::rsa_keys::{RSA_PRIVATE_KEY, RSA_PRIVATE_KEY_FOR_SIGH};
 use crate::server::{event_tag, AppState, WithContext};
 use crate::{
-    html_to_text, HTTPS_DOMAIN, INBOX_RELAYS, KEY_ID, NOTE_ID_PREFIX, OUTBOX_RELAYS, SECRET_KEY,
-    USER_AGENT, USER_ID_PREFIX,
+    html_to_text, HTTPS_DOMAIN, INBOX_RELAYS_FOR_10002, KEY_ID, NOTE_ID_PREFIX,
+    OUTBOX_RELAYS_FOR_10002, SECRET_KEY, USER_AGENT, USER_ID_PREFIX,
 };
 use axum::http::{Method, Request};
 use base64::Engine;
@@ -724,18 +724,18 @@ impl AppState {
         .to_event(&key)
         .unwrap();
         static MAIL_BOX: Lazy<Vec<(Url, Option<RelayMetadata>)>> = Lazy::new(|| {
-            OUTBOX_RELAYS
+            OUTBOX_RELAYS_FOR_10002
                 .iter()
                 .map(|r| {
-                    let marker = if INBOX_RELAYS.contains(r) {
+                    let marker = if INBOX_RELAYS_FOR_10002.contains(r) {
                         None
                     } else {
                         Some(RelayMetadata::Write)
                     };
                     (Url::parse(r).unwrap(), marker)
                 })
-                .chain(INBOX_RELAYS.iter().filter_map(|r| {
-                    if OUTBOX_RELAYS.contains(r) {
+                .chain(INBOX_RELAYS_FOR_10002.iter().filter_map(|r| {
+                    if OUTBOX_RELAYS_FOR_10002.contains(r) {
                         None
                     } else {
                         Some((Url::parse(r).unwrap(), Some(RelayMetadata::Read)))
@@ -748,7 +748,7 @@ impl AppState {
             .unwrap();
         tokio::join!(
             self.nostr
-                .send(Arc::new(metadata), self.metadata_relays.clone()),
+                .send(Arc::new(metadata), self.outbox_relays.clone()),
             self.nostr
                 .send(Arc::new(kind10002), self.metadata_relays.clone()),
         );
