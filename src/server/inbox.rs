@@ -394,18 +394,16 @@ fn get_npub_from_actor_id(id: &str) -> Option<PublicKey> {
 pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<nostr_lib::Tag> {
     let id_for_l = format!("{}.activitypub:{id}", *REVERSE_DNS);
     tags.into_iter()
-        .chain(
-            [
-                TagStandard::Proxy {
-                    id,
-                    protocol: nostr_lib::nips::nip48::Protocol::ActivityPub,
-                },
-                TagStandard::LabelNamespace(REVERSE_DNS.to_string()),
-                TagStandard::Label(vec![id_for_l, REVERSE_DNS.to_string()]),
-                TagStandard::Expiration(Timestamp::now() + 2592000),
-            ]
-            .map(|t| t.into()),
-        )
+        .chain([
+            TagStandard::Proxy {
+                id,
+                protocol: nostr_lib::nips::nip48::Protocol::ActivityPub,
+            }
+            .into(),
+            TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into(),
+            TagStandard::Label(vec![id_for_l, REVERSE_DNS.to_string()]).into(),
+            nostr_lib::Tag::parse(&["-"]).unwrap(),
+        ])
         .collect()
 }
 
