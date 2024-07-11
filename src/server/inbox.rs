@@ -109,11 +109,12 @@ pub async fn http_post_inbox(
                         Vec::new()
                     }
                 };
+                let keys = nostr_lib::Keys::new(actor.nsec.clone());
                 let l = EventBuilder::new(nostr_lib::Kind::ContactList, "", tags)
                     .custom_created_at(Timestamp::now())
-                    .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+                    .to_event(&keys)
                     .unwrap();
-                state.nostr_send(Arc::new(l)).await;
+                state.nostr_send(Arc::new(l), Arc::new(keys)).await;
             });
         }
         ActivityForDeInner::Undo { object } => match object.activity_inner {
@@ -136,12 +137,13 @@ pub async fn http_post_inbox(
                     }
                 };
                 if let Some(mut tags) = tags {
+                    let keys = nostr_lib::Keys::new(actor.nsec.clone());
                     tags.push(TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into());
                     let l = EventBuilder::new(nostr_lib::Kind::ContactList, "", tags)
                         .custom_created_at(Timestamp::now())
-                        .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+                        .to_event(&keys)
                         .unwrap();
-                    state.nostr_send(Arc::new(l)).await;
+                    state.nostr_send(Arc::new(l), Arc::new(keys)).await;
                 }
             }
             ActivityForDeInner::Like { id, .. } | ActivityForDeInner::Announce { id, .. } => {
@@ -150,16 +152,20 @@ pub async fn http_post_inbox(
                 if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
                     let nsec = actor.nsec.clone();
                     tokio::spawn(async move {
+                        let keys = nostr_lib::Keys::new(nsec.clone());
                         state
-                            .nostr_send(Arc::new(
-                                EventBuilder::delete([e])
-                                    .add_tags([TagStandard::LabelNamespace(
-                                        REVERSE_DNS.to_string(),
-                                    )
-                                    .into()])
-                                    .to_event(&nostr_lib::Keys::new(nsec.clone()))
-                                    .unwrap(),
-                            ))
+                            .nostr_send(
+                                Arc::new(
+                                    EventBuilder::delete([e])
+                                        .add_tags([TagStandard::LabelNamespace(
+                                            REVERSE_DNS.to_string(),
+                                        )
+                                        .into()])
+                                        .to_event(&keys)
+                                        .unwrap(),
+                                ),
+                                Arc::new(keys),
+                            )
                             .await;
                     });
                 } else {
@@ -212,7 +218,11 @@ pub async fn http_post_inbox(
             let note = get_note_from_this_server(&state, object.as_ref())
                 .await
                 .ok_or_else(|| Error::BadRequest(Some("object not found".to_string())))?;
-            let mut tags = vec![Tag::event(note.id), Tag::public_key(note.pubkey)];
+            let mut tags = vec![
+                Tag::event(note.id),
+                Tag::public_key(note.pubkey),
+                TagStandard::Kind(nostr_lib::event::Kind::TextNote).into(),
+            ];
             let mut content_converted = Cow::Borrowed("+");
             if let Some(content) = content {
                 let shortcode = content.trim_matches(':').to_string();
@@ -240,6 +250,7 @@ pub async fn http_post_inbox(
                     tags.push(e.into());
                 }
             }
+            let keys = nostr_lib::Keys::new(actor.nsec.clone());
             send_event(
                 &state,
                 Arc::new(
@@ -248,9 +259,10 @@ pub async fn http_post_inbox(
                         content_converted.to_string(),
                         event_tag(id.to_string(), tags),
                     )
-                    .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+                    .to_event(&keys)
                     .unwrap(),
                 ),
+                Arc::new(keys),
                 ap_id,
             )
             .await;
@@ -281,6 +293,7 @@ pub async fn http_post_inbox(
             if let Ok(event) =
                 get_event_from_object_id(&state, object.0.to_string(), Cow::Borrowed(&[])).await
             {
+                let keys = nostr_lib::Keys::new(actor.nsec.clone());
                 let event = EventBuilder::new(
                     nostr_lib::Kind::Repost,
                     "",
@@ -300,9 +313,9 @@ pub async fn http_post_inbox(
                     ),
                 )
                 .custom_created_at(Timestamp::from(published.timestamp() as u64))
-                .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+                .to_event(&keys)
                 .unwrap();
-                send_event(&state, Arc::new(event), ap_id.into_owned()).await;
+                send_event(&state, Arc::new(event), Arc::new(keys), ap_id.into_owned()).await;
             }
         }
         ActivityForDeInner::Delete {
@@ -313,15 +326,20 @@ pub async fn http_post_inbox(
                 info!("sending delete request ...");
                 let nsec = actor.nsec.clone();
                 tokio::spawn(async move {
+                    let keys = nostr_lib::Keys::new(nsec.clone());
                     state
-                        .nostr_send(Arc::new(
-                            EventBuilder::delete([e])
-                                .add_tags([
-                                    TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()
-                                ])
-                                .to_event(&nostr_lib::Keys::new(nsec.clone()))
-                                .unwrap(),
-                        ))
+                        .nostr_send(
+                            Arc::new(
+                                EventBuilder::delete([e])
+                                    .add_tags([TagStandard::LabelNamespace(
+                                        REVERSE_DNS.to_string(),
+                                    )
+                                    .into()])
+                                    .to_event(&keys)
+                                    .unwrap(),
+                            ),
+                            Arc::new(keys),
+                        )
                         .await;
                     state.event_deletion_queue.delete(e, nsec)
                 });
@@ -375,9 +393,14 @@ impl<'a> InternalApId<'a> {
     }
 }
 
-async fn send_event(state: &AppState, event: Arc<Event>, ap_id: InternalApId<'static>) {
+async fn send_event(
+    state: &AppState,
+    event: Arc<Event>,
+    keys: Arc<nostr_lib::Keys>,
+    ap_id: InternalApId<'static>,
+) {
     state.db.insert_ap_id_to_event_id(ap_id, event.id);
-    state.nostr_send(event).await;
+    state.nostr_send(event, keys).await;
 }
 
 async fn get_note_from_this_server(state: &AppState, url: &str) -> Option<Arc<Event>> {
@@ -738,19 +761,20 @@ async fn get_event_from_note<'a>(
             return Err(NostrConversionError::OptOutedAccount);
         }
     }
+    let keys = nostr_lib::Keys::new(actor.nsec.clone());
     let event = EventBuilder::new(
         nostr_lib::Kind::TextNote,
         content,
         event_tag(note.id.clone(), tags),
     )
     .custom_created_at(Timestamp::from(note.published.timestamp() as u64))
-    .to_event(&nostr_lib::Keys::new(actor.nsec.clone()))
+    .to_event(&keys)
     .unwrap();
     let event = Arc::new(event);
     let ap_id = InternalApId::get(note.id.into(), &actor.id)
         .map_err(|_| NostrConversionError::InvalidActorId)?
         .into_owned();
-    send_event(state, event.clone(), ap_id).await;
+    send_event(state, event.clone(), Arc::new(keys), ap_id).await;
     Ok(event)
 }
 

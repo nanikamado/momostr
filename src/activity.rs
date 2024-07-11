@@ -746,11 +746,15 @@ impl AppState {
         let kind10002 = EventBuilder::relay_list(MAIL_BOX.clone())
             .to_event(&key)
             .unwrap();
+        let key = Arc::new(key);
         tokio::join!(
+            self.nostr.send(
+                Arc::new(metadata),
+                Some(key.clone()),
+                self.outbox_relays.clone()
+            ),
             self.nostr
-                .send(Arc::new(metadata), self.outbox_relays.clone()),
-            self.nostr
-                .send(Arc::new(kind10002), self.metadata_relays.clone()),
+                .send(Arc::new(kind10002), Some(key), self.metadata_relays.clone()),
         );
         let new = self.db.get_ap_id_of_npub(&actor.npub).is_none();
         if new {

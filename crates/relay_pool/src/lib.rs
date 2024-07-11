@@ -41,6 +41,7 @@ enum FilterOp<RelayId> {
 #[derive(Debug, Clone)]
 struct SendEvent<RelayId> {
     event: Arc<nostr::Event>,
+    keys: Option<Arc<nostr::Keys>>,
     relays: Arc<FxHashSet<RelayId>>,
 }
 
@@ -233,9 +234,18 @@ impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
             .flatten()
     }
 
-    pub async fn send(&self, event: Arc<nostr::Event>, relays: Arc<FxHashSet<RelayId>>) {
+    pub async fn send(
+        &self,
+        event: Arc<nostr::Event>,
+        keys: Option<Arc<nostr::Keys>>,
+        relays: Arc<FxHashSet<RelayId>>,
+    ) {
         self.tx_for_send_event
-            .send(SendEvent { event, relays })
+            .send(SendEvent {
+                event,
+                keys,
+                relays,
+            })
             .await
             .unwrap();
     }
@@ -414,7 +424,7 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
         broadcast(
             &self.broadcast_sender,
             RelayOp {
-                msg: ClientMessage::Event(op.event),
+                msg: ClientMessage::Event(op.event, op.keys),
                 relays: op.relays,
             },
         );
@@ -497,6 +507,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
         user_agent: Arc<String>,
         last_connection_time: &mut SystemTime,
         connection_delay: &mut Duration,
+        auth: &mut Option<String>,
     ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Error>
     {
         let (mut ws, r) = loop {
@@ -525,23 +536,17 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
         };
         debug!("connected to {url}: r = {r:?}, sub = {subs:?}");
         for (id, filters) in subs.iter() {
-            let m = serde_json::to_string(&ClientMessage::Req {
-                subscription_id: *id,
-                filters: filters.clone(),
-            })
-            .unwrap();
+            let m = req_as_json(*id, filters);
             debug!("{url} <== {m}");
             ws.send(Message::Text(m)).await?;
         }
         if let Some(m) = message {
-            update_subs(m, subs);
-            let m = serde_json::to_string(m).unwrap();
-            debug!("{url} <== {m}");
-            ws.send(Message::Text(m)).await?;
+            send_event(m, url, &mut ws, subs, auth).await?;
         }
         Ok(ws)
     }
     let mut subs = HashMap::with_capacity(10);
+    let mut auth = None;
     let mut last_connection_time = SystemTime::UNIX_EPOCH;
     let mut connection_delay = Duration::from_secs(5);
     let mut ws = loop {
@@ -554,6 +559,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                     user_agent.clone(),
                     &mut last_connection_time,
                     &mut connection_delay,
+                    &mut auth,
                 )
                 .await?;
             }
@@ -571,7 +577,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                     match r {
                         Ok(r) => {
                             if let Err(unhandled_message) =
-                                handle_ops(r, &url, &mut ws, &mut subs).await {
+                                handle_ops(r, &url, &mut ws, &mut subs, &mut auth).await {
                                 break unhandled_message;
                             }
                         }
@@ -590,6 +596,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                         &tx_for_events,
                         &subs,
                         &mut waiting_for_pong,
+                        &mut auth,
                     ).await {
                         break None;
                     }
@@ -608,6 +615,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
                             user_agent.clone(),
                             &mut last_connection_time,
                             &mut connection_delay,
+                            &mut auth,
                         )
                         .await?;
                     }
@@ -619,31 +627,16 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
             };
         } else {
             ws = first_request(
-                &unhandled_message.map(ClientMessage::Event),
+                &unhandled_message.map(|(e, s)| ClientMessage::Event(e, s)),
                 &url,
                 &mut subs,
                 user_agent.clone(),
                 &mut last_connection_time,
                 &mut connection_delay,
+                &mut auth,
             )
             .await?;
         }
-    }
-}
-
-fn update_subs(message: &ClientMessage, subs: &mut HashMap<FilterId, Vec<Filter>>) {
-    match message {
-        ClientMessage::Req {
-            subscription_id: id,
-            filters,
-        } => {
-            subs.insert(*id, filters.clone());
-        }
-        ClientMessage::Close(id) => {
-            // FIXME: `id` does not exist in `subs` when doing `cargo test media_test`
-            subs.remove(id);
-        }
-        ClientMessage::Event(_) => (),
     }
 }
 
@@ -652,16 +645,14 @@ async fn handle_ops(
     url: &url::Url,
     ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     subs: &mut HashMap<FilterId, Vec<Filter>>,
-) -> Result<(), Option<Arc<Event>>> {
-    update_subs(&message, subs);
-    let m = serde_json::to_string(&message).unwrap();
-    debug!("{url} <== {m}");
-    if let Err(e) = ws.send(Message::Text(m)).await {
+    auth: &mut Option<String>,
+) -> Result<(), Option<(Arc<Event>, Option<Arc<nostr::Keys>>)>> {
+    if let Err(e) = send_event(&message, url, ws, subs, auth).await {
         use tokio_tungstenite::tungstenite::Error::*;
         match e {
             ConnectionClosed | AlreadyClosed | WriteBufferFull(_) => {
-                if let ClientMessage::Event(e) = message {
-                    Err(Some(e))
+                if let ClientMessage::Event(e, s) = message {
+                    Err(Some((e, s)))
                 } else {
                     Err(None)
                 }
@@ -681,6 +672,48 @@ async fn handle_ops(
     }
 }
 
+async fn send_event(
+    message: &ClientMessage,
+    url: &url::Url,
+    ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+    subs: &mut HashMap<FilterId, Vec<Filter>>,
+    auth: &Option<String>,
+) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    let m = match message {
+        ClientMessage::Req {
+            subscription_id: id,
+            filters,
+        } => {
+            subs.insert(*id, filters.clone());
+            req_as_json(*id, filters)
+        }
+        ClientMessage::Close(id) => {
+            subs.remove(id);
+            format!(r#"["CLOSE",{id}]"#)
+        }
+        ClientMessage::Event(e, keys) => {
+            if let (Some(auth), Some(keys)) = (auth, keys) {
+                let e = nostr::EventBuilder::auth(auth, url.clone())
+                    .to_event(keys)
+                    .unwrap();
+                let m = format!(r#"["AUTH",{}]"#, e.as_json());
+                debug!("{url} <== {m}");
+                ws.send(Message::Text(m)).await?;
+            }
+            format!(r#"["EVENT",{}]"#, e.as_json())
+        }
+    };
+    debug!("{url} <== {m}");
+    ws.send(Message::Text(m)).await
+}
+
+fn req_as_json(id: FilterId, filters: &[Filter]) -> String {
+    format!(
+        r#"["REQ",{id},{}]"#,
+        filters.iter().format_with(",", |a, f| f(&a.as_json()))
+    )
+}
+
 #[tracing::instrument(skip_all)]
 async fn handle_message<RelayId: Clone + Copy + PartialEq>(
     m: Result<Option<Result<Message, tokio_tungstenite::tungstenite::Error>>, Elapsed>,
@@ -689,6 +722,7 @@ async fn handle_message<RelayId: Clone + Copy + PartialEq>(
     tx_for_events: &SenderWithId<RelayId>,
     subs: &HashMap<FilterId, Vec<Filter>>,
     waiting_for_pong: &mut bool,
+    auth: &mut Option<String>,
 ) -> bool {
     match m {
         Ok(Some(Ok(m))) => {
@@ -703,6 +737,7 @@ async fn handle_message<RelayId: Clone + Copy + PartialEq>(
                             RelayMessage::Event { .. } => {
                                 tx_for_events.send(m).await;
                             }
+                            RelayMessage::Auth { challenge } => *auth = Some(challenge.clone()),
                             _ => {
                                 debug!("{url} ==> {t}");
                                 tx_for_events.send(m).await;
@@ -760,7 +795,7 @@ async fn handle_message<RelayId: Clone + Copy + PartialEq>(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClientMessage {
     /// Event
-    Event(Arc<Event>),
+    Event(Arc<Event>, Option<Arc<nostr::Keys>>),
     /// Req
     Req {
         /// Subscription ID
@@ -770,39 +805,4 @@ enum ClientMessage {
     },
     /// Close
     Close(FilterId),
-}
-
-impl Serialize for ClientMessage {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        use serde::ser::SerializeSeq;
-        match self {
-            ClientMessage::Event(e) => {
-                let mut seq = serializer.serialize_seq(Some(2))?;
-                seq.serialize_element("EVENT")?;
-                seq.serialize_element(&**e)?;
-                seq.end()
-            }
-            ClientMessage::Req {
-                subscription_id,
-                filters,
-            } => {
-                let mut seq = serializer.serialize_seq(Some(2 + filters.len()))?;
-                seq.serialize_element("REQ")?;
-                seq.serialize_element(subscription_id)?;
-                for f in filters {
-                    seq.serialize_element(f)?;
-                }
-                seq.end()
-            }
-            ClientMessage::Close(id) => {
-                let mut seq = serializer.serialize_seq(Some(2))?;
-                seq.serialize_element("CLOSE")?;
-                seq.serialize_element(id)?;
-                seq.end()
-            }
-        }
-    }
 }

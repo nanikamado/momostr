@@ -196,10 +196,11 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
             .into(),
         );
     }
+    let keys = Keys::new(BOT_SEC.clone());
     let e = EventBuilder::text_note(response, tags)
-        .to_event(&Keys::new(BOT_SEC.clone()))
+        .to_event(&keys)
         .unwrap();
-    state.nostr_send(Arc::new(e)).await;
+    state.nostr_send(Arc::new(e), Arc::new(keys)).await;
 }
 
 pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
@@ -229,5 +230,5 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
         .custom_created_at(Timestamp::now().clamp(event.created_at + 1, event.created_at + 600))
         .to_event(&bot_keys)
         .unwrap();
-    state.nostr_send(Arc::new(e)).await;
+    state.nostr_send(Arc::new(e), Arc::new(bot_keys)).await;
 }

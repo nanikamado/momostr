@@ -97,6 +97,7 @@ pub async fn get_nostr_user_data_without_cache(
                         .nostr
                         .send(
                             e.event,
+                            None,
                             Arc::new(outdated_metadata.into_iter().map(|m| m.relay_id).collect()),
                         )
                         .await;
@@ -145,10 +146,12 @@ impl AppState {
             .await
     }
 
-    pub async fn nostr_send(&self, event: Arc<Event>) {
+    pub async fn nostr_send(&self, event: Arc<Event>, keys: Arc<nostr_lib::Keys>) {
         let s = self.nostr_send_rate.lock().wait();
         s.await;
-        self.nostr.send(event, self.outbox_relays.clone()).await
+        self.nostr
+            .send(event, Some(keys), self.outbox_relays.clone())
+            .await
     }
 
     #[tracing::instrument(skip_all)]
