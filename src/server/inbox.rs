@@ -628,7 +628,11 @@ async fn get_event_from_note<'a>(
     }
     let content_tmp: String;
     let content = match &note.source {
-        Some(source) if source.media_type.starts_with("text/") => Cow::from(&source.content),
+        Some(source)
+            if source.media_type.starts_with("text/") && source.media_type != "text/html" =>
+        {
+            Cow::from(&source.content)
+        }
         _ => {
             content_tmp = html_to_text(&note.content);
             HASHTAG_LINK_REGEX.replace_all(&content_tmp, "$tag")
