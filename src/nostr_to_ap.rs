@@ -1,7 +1,7 @@
 use crate::activity::{
     activity_to_string, Actor, ActorOrProxied, AnnounceForSer, Attachment, CreateForSer,
     DeleteForSer, FollowActivity, ImageForSe, Note, NoteForDe, NoteTagForSer, ReactionForSer,
-    UndoFollowActivity, UpdateForSer,
+    Tombstone, UndoActivity, UpdateForSer,
 };
 use crate::bot::{handle_dm_message_to_bot, handle_message_to_bot};
 use crate::error::Error;
@@ -38,7 +38,6 @@ use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
 use url::Url;
 
-#[allow(clippy::mutable_key_type)]
 #[tracing::instrument(skip_all)]
 async fn broadcast_to_actors<A: Serialize, S: AsRef<str> + Debug>(
     state: &AppState,
@@ -178,7 +177,6 @@ fn handle_event(
                         );
                     }
                     if let Some(note) = Note::from_nostr_event(&state, &event).await {
-                        #[allow(clippy::mutable_key_type)]
                         let inboxes = broadcast_to_actors(
                             &state,
                             CreateForSer {
@@ -198,6 +196,9 @@ fn handle_event(
                             .db
                             .insert_event_id_to_inbox(
                                 event.id.as_bytes(),
+                                event.kind,
+                                event.author(),
+                                None,
                                 inboxes.into_iter().map(|l| l.to_string()),
                             )
                             .await;
@@ -283,7 +284,7 @@ fn handle_event(
                     },
                     tag: emoji,
                 };
-                broadcast_to_actors(
+                let inboxes = broadcast_to_actors(
                     &state,
                     activity,
                     &author,
@@ -297,6 +298,16 @@ fn handle_event(
                     false,
                 )
                 .await;
+                state
+                    .db
+                    .insert_event_id_to_inbox(
+                        event.id.as_bytes(),
+                        event.kind,
+                        event.author(),
+                        Some(e),
+                        inboxes.into_iter().map(|l| l.to_string()),
+                    )
+                    .await;
             });
         }
         nostr_lib::Kind::EventDeletion => {
@@ -309,21 +320,54 @@ fn handle_event(
                         let event_id = *event_id;
                         let state = state.clone();
                         let author = author.clone();
+                        let author_d = event.author();
                         let id = id.clone();
                         tokio::spawn(async move {
-                            let inboxes = state.db.delete_event_id(event_id.as_bytes()).await;
-                            if !inboxes.is_empty() {
-                                let body = activity_to_string(
-                                    &DeleteForSer {
-                                        actor: &author,
-                                        id: &id,
-                                        object: &event_id.to_bech32().unwrap(),
-                                    },
-                                    &author,
-                                    true,
-                                )
-                                .await;
-                                for i in inboxes {
+                            if let Some(m) = state.db.delete_event_id(event_id.as_bytes()).await {
+                                if m.author.map_or(false, |a| a != author_d) {
+                                    return;
+                                }
+                                let event_id = event_id.to_bech32().unwrap();
+                                use nostr_lib::Kind;
+                                let body = match m.kind {
+                                    Kind::TextNote => {
+                                        activity_to_string(
+                                            &DeleteForSer {
+                                                actor: &author,
+                                                id: &id,
+                                                object: &event_id,
+                                            },
+                                            &author,
+                                            true,
+                                        )
+                                        .await
+                                    }
+                                    _ => {
+                                        let (type_, id_prefix) = if m.kind == Kind::Reaction {
+                                            ("Like", "reaction")
+                                        } else {
+                                            ("Announce", "announce")
+                                        };
+                                        activity_to_string(
+                                            &UndoActivity {
+                                                object: Tombstone {
+                                                    type_,
+                                                    id: &format!(
+                                                        "{HTTPS_DOMAIN}/{id_prefix}/{event_id}",
+                                                    ),
+                                                    actor: &author,
+                                                    object: m.object.as_deref(),
+                                                },
+                                                actor: &author,
+                                                id: &format!("{HTTPS_DOMAIN}/undo/{id}"),
+                                            },
+                                            &author,
+                                            true,
+                                        )
+                                        .await
+                                    }
+                                };
+                                for i in m.inboxes {
                                     if let Err(e) =
                                         state.send_string_activity(&i, &author, body.clone()).await
                                     {
@@ -383,7 +427,7 @@ fn handle_event(
                     };
                     let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
                     let followers = state.db.get_followers_of_nostr(event.author_ref());
-                    broadcast_to_actors(
+                    let inboxes = broadcast_to_actors(
                         &state,
                         AnnounceForSer {
                             actor: &author,
@@ -402,6 +446,16 @@ fn handle_event(
                         false,
                     )
                     .await;
+                    state
+                        .db
+                        .insert_event_id_to_inbox(
+                            event.id.as_bytes(),
+                            event.kind,
+                            event.author(),
+                            Some(e),
+                            inboxes.into_iter().map(|l| l.to_string()),
+                        )
+                        .await;
                 });
             }
         }
@@ -420,7 +474,6 @@ fn handle_event(
                             event.author_ref().to_bech32().unwrap()
                         );
                         let published = event.created_at.to_human_datetime();
-                        #[allow(clippy::mutable_key_type)]
                         broadcast_to_actors(
                             &state,
                             UpdateForSer {
@@ -1069,7 +1122,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                     .send_activity(
                         inbox,
                         &author,
-                        UndoFollowActivity {
+                        UndoActivity {
                             object: FollowActivity {
                                 actor: &author,
                                 object: id,

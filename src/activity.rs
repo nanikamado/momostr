@@ -260,6 +260,16 @@ impl Serialize for AnnounceForSer<'_> {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct Tombstone<'a> {
+    #[serde(rename = "type")]
+    pub type_: &'a str,
+    pub id: &'a str,
+    pub actor: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object: Option<&'a str>,
+}
+
 #[derive(Clone, Debug)]
 pub struct UpdateForSer<'a, M: Serialize> {
     pub id: &'a str,
@@ -454,8 +464,8 @@ pub struct FollowActivity<'a> {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type", rename = "Undo")]
-pub struct UndoFollowActivity<'a> {
-    pub object: FollowActivity<'a>,
+pub struct UndoActivity<'a, M: Serialize> {
+    pub object: M,
     pub actor: &'a str,
     pub id: &'a str,
 }
