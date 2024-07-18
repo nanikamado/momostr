@@ -302,9 +302,7 @@ pub async fn http_post_inbox(
                         [
                             TagStandard::Event {
                                 event_id: event.event.id,
-                                relay_url: Some(
-                                    state.relay_url[event.relay_id.0 as usize].clone().into(),
-                                ),
+                                relay_url: Some(state.relay_url[&event.relay_id].clone().into()),
                                 marker: None,
                             }
                             .into(),

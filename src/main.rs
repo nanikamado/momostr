@@ -39,12 +39,6 @@ const USER_ID_PREFIX: &str = env!("USER_ID_PREFIX");
 const BIND_ADDRESS: &str = env!("BIND_ADDRESS");
 const SECRET_KEY: &str = env!("SECRET_KEY");
 const STACK_SIZE: usize = 8 * 1024 * 1024;
-static RELAYS_EXTERNAL: Lazy<Vec<&str>> = Lazy::new(|| {
-    env!("EXTERNAL_MAIN_RELAYS")
-        .split(',')
-        .filter(|a| !a.is_empty())
-        .collect_vec()
-});
 static INBOX_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
     env!("INBOX_RELAYS")
         .split(',')
@@ -164,7 +158,7 @@ async fn run() {
         nostr,
         nostr_send_rate: Mutex::new(RateLimiter::new(5, Duration::from_secs(1))),
         nostr_subscribe_rate: Mutex::new(RateLimiter::new(50, Duration::from_secs(1))),
-        relay_url: RELAYS_EXTERNAL.iter().map(|a| a.to_string()).collect(),
+        relay_url: relay_to_id_map.into_iter().map(|(k, v)| (v, k)).collect(),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),

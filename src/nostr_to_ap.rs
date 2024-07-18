@@ -1212,7 +1212,11 @@ mod tests {
                         u32::MAX,
                         Duration::from_secs(0),
                     )),
-                    relay_url: relay_url.into_iter().map(|a| a.to_string()).collect(),
+                    relay_url: relay_url
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, url)| (RelayId(i as u32), url))
+                        .collect(),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
                     actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),

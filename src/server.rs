@@ -12,10 +12,7 @@ use crate::server::inbox::http_post_inbox;
 pub use crate::server::inbox::{event_tag, InternalApId};
 use crate::server::nodeinfo::well_known_nodeinfo;
 use crate::util::{Merge, RateLimiter};
-use crate::{
-    RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS_FOR_10002, RELAYS_EXTERNAL,
-    USER_ID_PREFIX,
-};
+use crate::{RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS_FOR_10002, USER_ID_PREFIX};
 use axum::extract::{Path, Query, Request, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -53,7 +50,7 @@ pub struct AppState {
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,
     pub nostr_user_cache: Mutex<TimedSizedCache<nostr_lib::PublicKey, LazyUser>>,
-    pub relay_url: Vec<String>,
+    pub relay_url: FxHashMap<RelayId, url::Url>,
     pub inbox_relays: Arc<FxHashSet<RelayId>>,
     pub outbox_relays: Arc<FxHashSet<RelayId>>,
     pub metadata_relays: Arc<FxHashSet<RelayId>>,
@@ -461,7 +458,7 @@ pub async fn http_get_user(
         debug!("redirect");
         Ok(Redirect::to(&format!(
             "https://coracle.social/{}",
-            Nip19Profile::new(public_key, [RELAYS_EXTERNAL[0]])
+            Nip19Profile::new(public_key, [OUTBOX_RELAYS_FOR_10002[0]])
                 .unwrap()
                 .to_bech32()
                 .unwrap()

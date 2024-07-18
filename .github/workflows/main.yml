@@ -41,8 +41,8 @@ env:
   METADATA_RELAYS: ""
   OUTBOX_RELAYS: ""
   INBOX_RELAYS: ""
-  MAIN_RELAYS: ""
-  EXTERNAL_MAIN_RELAYS: ""
+  OUTBOX_RELAYS_FOR_10002: "wss://relay.momostr.example"
+  INBOX_RELAYS_FOR_10002: ""
   DOMAIN: momostr.test
   HTTPS_DOMAIN: https://momostr.test
   NOTE_ID_PREFIX: https://momostr.test/notes/
