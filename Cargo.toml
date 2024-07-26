@@ -7,9 +7,6 @@ edition = "2021"
 default-members = ["."]
 members = [".", "crates/*"]
 
-[features]
-memory_debug = ["backtrace"]
-
 [dependencies]
 relay_pool = { path = "crates/relay_pool" }
 html_to_md = { path = "crates/html_to_md" }
