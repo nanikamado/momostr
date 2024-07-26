@@ -55,7 +55,7 @@ async fn delete_async(
     ids_for_log: &str,
 ) -> Result<(), Error> {
     let relays: Vec<url::Url> = http_client
-        .get("https://api.nostr.watch/v1/online")
+        .get("https://api.nostr.watch/v1/nip/1")
         .send()
         .await?
         .json()
