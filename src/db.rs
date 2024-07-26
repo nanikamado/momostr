@@ -37,7 +37,7 @@ pub struct Db {
     inbox_to_id: Rocks,
     id_to_inbox: Rocks,
     inbox_counter: AtomicU32,
-    pub event_id_to_metadata: Rocks,
+    event_id_to_metadata: Rocks,
     nostr_to_followee: Rocks,
     nostr_to_followee_cache: Mutex<LruCache<nostr_lib::PublicKey, Arc<FxHashSet<Arc<String>>>>>,
     ap_id_to_event_id: Rocks,
