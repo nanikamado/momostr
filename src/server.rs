@@ -1,7 +1,7 @@
 mod inbox;
 mod nodeinfo;
 
-use crate::activity::{ActorOrProxied, Note};
+use crate::activity::{ActorOrProxied, Note, OrderedCollection, OrderedCollectionPage};
 use crate::db::Db;
 use crate::error::Error;
 use crate::event_deletion_queue::EventDeletionQueue;
@@ -66,6 +66,7 @@ pub async fn listen(state: Arc<AppState>) -> Result<(), Error> {
         .route("/inbox", post(http_post_inbox))
         .route("/empty", get(http_ordered_collection))
         .route("/users/:user", get(http_get_user))
+        .route("/users/:user/following", get(http_get_user_following))
         .route("/notes/:note", get(http_get_note))
         .route("/.well-known/webfinger", get(webfinger))
         .route("/.well-known/nostr.json", get(nostr_json))
@@ -323,10 +324,7 @@ impl Serialize for MetadataActivity<'_> {
             "followers",
             &format_args!("{HTTPS_DOMAIN}/empty?followers={id}"),
         )?;
-        m.serialize_entry(
-            "following",
-            &format_args!("{HTTPS_DOMAIN}/empty?following={id}"),
-        )?;
+        m.serialize_entry("following", &format_args!("{id}/following"))?;
         m.serialize_entry("endpoints", &json!({ "sharedInbox": inbox }))?;
 
         // this format is not compatible with threads.net
@@ -474,6 +472,30 @@ pub async fn http_get_user(
                 .into_response()),
         }
     }
+}
+
+#[debug_handler]
+#[tracing::instrument(skip(state))]
+pub async fn http_get_user_following(
+    Path(npub_bech): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<JsonActivity, Error> {
+    let npub = nostr_lib::PublicKey::from_bech32(&npub_bech).map_err(|_| Error::NotFound)?;
+    let following = state.db.get_followee_of_nostr(&npub).unwrap_or_default();
+    let total_items = following.len();
+    let path = format!("{USER_ID_PREFIX}{npub_bech}/following");
+    let a = OrderedCollection {
+        first: OrderedCollectionPage {
+            id: &format!("{path}?page=1"),
+            ordered_items: following,
+            part_of: &path,
+            total_items,
+        },
+        id: &path,
+        total_items,
+    };
+    let s = serde_json::to_string(&WithContext(&a)).unwrap();
+    Ok(JsonActivity(s))
 }
 
 struct JsonActivity(String);
