@@ -2,11 +2,11 @@
 
 use backtrace::Backtrace;
 use itertools::Itertools;
-use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::fmt::Write;
+use std::sync::LazyLock as Lazy;
 
 pub struct TraceAllocator {
     trace: Lazy<Mutex<FxHashMap<usize, (usize, Backtrace)>>>,

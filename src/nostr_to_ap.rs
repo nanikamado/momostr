@@ -24,7 +24,6 @@ use nostr_lib::nips::nip48::Protocol;
 use nostr_lib::types::Metadata;
 use nostr_lib::util::JsonUtil;
 use nostr_lib::{Event, EventId, FromBech32, PublicKey, ToBech32};
-use once_cell::sync::Lazy;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use regex::{Captures, Regex};
 use relay_pool::{EventStream, EventWithRelayId};
@@ -33,7 +32,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::fmt::{Debug, Write};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::OnceCell;
 use tracing::{debug, error, info};
 use url::Url;
@@ -522,9 +521,10 @@ async fn media<'a>(
     content: &'a str,
     handle_cache: &mut FxHashMap<PublicKey, Arc<(String, String)>>,
 ) -> (Vec<Attachment>, Content, Option<Quote>) {
-    pub static NON_SPACE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\S").unwrap());
-    pub static NEVENT: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?:nostr:)?(nevent1[0-9a-z]{50,}|note1[0-9a-z]{50,})").unwrap());
+    pub static NON_SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\S").unwrap());
+    pub static NEVENT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?:nostr:)?(nevent1[0-9a-z]{50,}|note1[0-9a-z]{50,})").unwrap()
+    });
     let mut link_finder = LinkFinder::new();
     link_finder.kinds(&[LinkKind::Url]);
     let mut attachments = Vec::new();
@@ -787,7 +787,7 @@ pub struct Content {
 
 impl Content {
     pub fn span(&mut self, s: &str) {
-        static HASHTAG: Lazy<Regex> = Lazy::new(|| {
+        static HASHTAG: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(
                 r"#([\p{XID_Continue}\p{Emoji_Component}\p{Extended_Pictographic}_+\-&&[^#]]+)",
             )
@@ -1159,16 +1159,15 @@ mod tests {
     use lru::LruCache;
     use nostr_lib::nips::nip19::Nip19Event;
     use nostr_lib::{FromBech32, ToBech32};
-    use once_cell::sync::Lazy;
     use parking_lot::Mutex;
     use relay_pool::RelayPool;
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::num::NonZeroUsize;
-    use std::sync::Arc;
+    use std::sync::{Arc, LazyLock};
     use std::time::Duration;
     use tokio::runtime::Runtime;
 
-    static RT: Lazy<Runtime> = Lazy::new(|| {
+    static RT: LazyLock<Runtime> = LazyLock::new(|| {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

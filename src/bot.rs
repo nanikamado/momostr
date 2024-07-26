@@ -8,10 +8,9 @@ use nostr_lib::nips::nip10::Marker;
 use nostr_lib::nips::nip19::FromBech32;
 use nostr_lib::types::{Filter, Timestamp};
 use nostr_lib::{Event, EventBuilder, Keys, Kind, Tag};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock as Lazy};
 use std::time::Duration;
 
 async fn handle_command_from_nostr_account(

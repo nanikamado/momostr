@@ -25,7 +25,6 @@ use lru::LruCache;
 use nodeinfo::nodeinfo;
 use nostr_lib::nips::nip19::Nip19Profile;
 use nostr_lib::{EventId, FromBech32, Metadata, PublicKey, ToBech32};
-use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use regex::Regex;
 use relay_pool::{EventWithRelayId, RelayPool};
@@ -34,7 +33,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock as Lazy};
 use std::time::Duration;
 use tracing::{debug, info};
 

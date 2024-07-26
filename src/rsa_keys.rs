@@ -1,7 +1,7 @@
-use once_cell::sync::Lazy;
 use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding};
 use rsa::{RsaPrivateKey, RsaPublicKey};
 use sigh::Key;
+use std::sync::LazyLock as Lazy;
 
 static RSA_PRIVATE_KEY_STRING: &str = env!("RSA_PRIVATE_KEY");
 

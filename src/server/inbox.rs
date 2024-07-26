@@ -17,14 +17,13 @@ use nostr_lib::nips::nip10::Marker;
 use nostr_lib::{
     Event, EventBuilder, FromBech32, PublicKey, Tag, TagKind, TagStandard, Timestamp, ToBech32,
 };
-use once_cell::sync::Lazy;
 use regex::Regex;
 use relay_pool::EventWithRelayId;
 use rustc_hash::FxHashSet;
 use std::borrow::{Borrow, Cow};
 use std::fmt::Write;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock as Lazy};
 use tracing::{debug, error, info, trace};
 use url::Url;
 

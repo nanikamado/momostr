@@ -3,7 +3,6 @@ mod preloader;
 use json_ld::RemoteDocument;
 use json_syntax::{Parse, Value};
 use locspan::Location;
-use once_cell::sync::Lazy;
 use preloader::PreLoaderFactory;
 use rsa::RsaPrivateKey;
 use rsa_signature_2017::json_ld::JsonLdOptions;
@@ -12,7 +11,7 @@ use sophia_api::dataset::CollectibleDataset;
 use sophia_inmem::dataset::LightDataset;
 use sophia_iri::Iri;
 use sophia_jsonld::JsonLdParser;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock as Lazy};
 
 static ACTIVITYSTREAMS: Lazy<JsonLdParser<PreLoaderFactory>> = Lazy::new(|| {
     JsonLdParser::new_with_options(
