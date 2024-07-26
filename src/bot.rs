@@ -1,6 +1,6 @@
 use crate::nostr_to_ap::update_follow_list;
 use crate::server::AppState;
-use crate::{ADMIN_PUB, BOT_PUB, BOT_SEC, NPUB_REG};
+use crate::{ADMIN_PUB, BOT_PUB, BOT_SEC, NPUB_REG, USER_ID_PREFIX};
 use nostr_lib::event::TagStandard;
 use nostr_lib::key::PublicKey;
 use nostr_lib::nips::nip04;
@@ -10,6 +10,7 @@ use nostr_lib::types::{Filter, Timestamp};
 use nostr_lib::{Event, EventBuilder, Keys, Kind, Tag};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -113,6 +114,27 @@ async fn handle_command_from_admin(state: &Arc<AppState>, command: &str) -> Stri
         } else {
             "error".to_string()
         }
+    } else if let Some(s) = command.strip_prefix("activity ") {
+        async fn send_activity(state: &Arc<AppState>, command: &str) -> Option<String> {
+            let r = Regex::new(r"(npub1[0-9a-z]{50,}) (https\S+) (.*)").unwrap();
+            let cs = r.captures(command)?;
+            let npub = cs.get(1)?.as_str();
+            let inbox = url::Url::from_str(cs.get(2)?.as_str()).ok()?;
+            let activity = cs.get(3)?.as_str();
+            let author = format!("{USER_ID_PREFIX}{npub}");
+
+            if let Err(e) = state
+                .send_string_activity(&inbox, author, activity.to_string())
+                .await
+            {
+                Some(format!("could not send activity: {e:?}"))
+            } else {
+                Some("ok".to_string())
+            }
+        }
+        send_activity(state, s)
+            .await
+            .unwrap_or_else(|| "error".to_string())
     } else {
         format!("Command `{command}` is not supported.")
     }
@@ -211,8 +233,8 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
     let Ok(command) = nip04::decrypt(&BOT_SEC, author, event.content.clone()) else {
         return;
     };
-    let command = command.trim().to_lowercase();
-    let command = MENTION_REG.replace(&command, "");
+    let command = command.trim();
+    let command = MENTION_REG.replace(command, "");
     let response = if author == &*BOT_PUB || Some(author) == ADMIN_PUB.as_ref() {
         if command.starts_with("response:") {
             return;
