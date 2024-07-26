@@ -13,6 +13,7 @@ use nostr_lib::nips::nip65::RelayMetadata;
 use nostr_lib::{EventBuilder, JsonUtil, Metadata};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use rustc_hash::FxHashSet;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -499,6 +500,25 @@ pub async fn activity_to_string<A: Serialize, S: AsRef<str>>(
     }
 }
 
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
+pub struct OrderedCollection<'a> {
+    pub first: OrderedCollectionPage<'a>,
+    pub id: &'a str,
+    pub total_items: usize,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
+pub struct OrderedCollectionPage<'a> {
+    pub id: &'a str,
+    pub ordered_items: Arc<FxHashSet<Arc<String>>>,
+    pub part_of: &'a str,
+    pub total_items: usize,
+}
+
 impl AppState {
     #[tracing::instrument(skip_all)]
     pub async fn send_activity<S: AsRef<str>, A: Serialize>(
@@ -575,7 +595,7 @@ impl AppState {
             .unwrap();
         let t = self
             .http_client
-            .get(&url.to_string())
+            .get(url.as_str())
             .headers(r.headers().clone())
             .send()
             .await?
@@ -981,11 +1001,38 @@ pub enum ActorAttachment {
     Other(IgnoredAny),
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinkForDe {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub rel: Option<String>,
     pub href: String,
+}
+
+impl<'a> Deserialize<'a> for LinkForDe {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'a>,
+    {
+        #[derive(Deserialize, Debug, Clone, PartialEq)]
+        pub struct LinkForDe {
+            pub rel: Option<String>,
+            pub href: String,
+        }
+
+        #[derive(Deserialize, Debug, Clone, PartialEq)]
+        #[serde(untagged)]
+        enum StringOrStructLink {
+            String(String),
+            Struct(LinkForDe),
+        }
+
+        match StringOrStructLink::deserialize(deserializer)? {
+            StringOrStructLink::String(s) => Ok(Self { rel: None, href: s }),
+            StringOrStructLink::Struct(s) => Ok(Self {
+                rel: s.rel,
+                href: s.href,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -994,23 +1041,19 @@ pub struct ActorUrl {
     pub proxied_from: Option<String>,
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum ActorUrlForDe {
+    Array(Vec<LinkForDe>),
+    Single(LinkForDe),
+}
+
 impl<'a> Deserialize<'a> for ActorUrl {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'a>,
     {
-        #[derive(Deserialize, Debug, Clone, PartialEq)]
-        #[serde(untagged)]
-        pub enum ActorUrlForDe {
-            Simple(String),
-            Single(LinkForDe),
-            Array(Vec<LinkForDe>),
-        }
         Ok(match Option::<ActorUrlForDe>::deserialize(deserializer)? {
-            Some(ActorUrlForDe::Simple(url)) => ActorUrl {
-                url: Some(url),
-                proxied_from: None,
-            },
             Some(ActorUrlForDe::Single(l)) => {
                 if l.href.starts_with("nostr:") && l.rel.map(|a| a == "canonical").unwrap_or(false)
                 {
@@ -1101,7 +1144,7 @@ struct EndPoints {
 #[cfg(test)]
 mod tests {
     use super::{ListOrSingle, NoteForDe, UrlStruct};
-    use crate::activity::{ActivityForDeInner, ActorOrProxied, OptionForDe, StrOrId};
+    use crate::activity::{ActivityForDeInner, ActorOrProxied, ActorUrl, OptionForDe, StrOrId};
     use serde::de::IgnoredAny;
 
     #[test]
@@ -1200,5 +1243,21 @@ mod tests {
         let s = r##"1"##;
         let a: OptionForDe<UrlStruct> = serde_json::from_str(s).unwrap();
         assert_eq!(a, OptionForDe::None(IgnoredAny));
+    }
+
+    #[test]
+    fn url_deserialize() {
+        let s = r##"["a","b"]"##;
+        let a: ActorUrl = serde_json::from_str(s).unwrap();
+        assert_eq!(a.url, Some("a".to_string()));
+        let s = r##""a""##;
+        let a: ActorUrl = serde_json::from_str(s).unwrap();
+        assert_eq!(a.url, Some("a".to_string()));
+        let s = r##"{"href":"a"}"##;
+        let a: ActorUrl = serde_json::from_str(s).unwrap();
+        assert_eq!(a.url, Some("a".to_string()));
+        let s = r##"[{"href":"a"}]"##;
+        let a: ActorUrl = serde_json::from_str(s).unwrap();
+        assert_eq!(a.url, Some("a".to_string()));
     }
 }
