@@ -500,6 +500,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
     tx_for_events: SenderWithId<RelayId>,
     user_agent: Arc<String>,
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    #[tracing::instrument(skip_all)]
     async fn first_request(
         message: &Option<ClientMessage>,
         url: &url::Url,
@@ -640,6 +641,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
     }
 }
 
+#[tracing::instrument(skip_all)]
 async fn handle_ops(
     message: ClientMessage,
     url: &url::Url,
