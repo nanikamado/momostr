@@ -538,6 +538,7 @@ async fn get_event_from_note<'a>(
         .iter()
         .chain(note.cc.iter())
         .any(|a| [AS_PUBLIC, "Public", "as:Public"].contains(&a.as_str()));
+    #[allow(clippy::mutable_key_type)]
     let mut tags: FxHashSet<nostr_lib::Tag> = FxHashSet::default();
     if let Some(r) = note.summary {
         if !r.is_empty() {
