@@ -307,6 +307,7 @@ impl Serialize for MetadataActivity<'_> {
         )?;
         m.serialize_entry("type", "Person")?;
         m.serialize_entry("id", &id)?;
+        m.serialize_entry("url", &id)?;
         m.serialize_entry("preferredUsername", &npub)?;
         match &self.metadata.display_name {
             Some(name) if !name.is_empty() => {
