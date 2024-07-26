@@ -541,7 +541,8 @@ impl AppState {
         SigningConfig::new(RsaSha256, &RSA_PRIVATE_KEY_FOR_SIGH, author.as_ref())
             .sign(&mut r)
             .unwrap();
-        let r = reqwest::Request::try_from(r)?;
+        let mut r = reqwest::Request::try_from(r)?;
+        *r.timeout_mut() = Some(Duration::from_secs(20));
         let r = self.http_client.execute(r).await?;
         info!(
             "send_activity response: {inbox} ==> status: {}, body: {:?}",
