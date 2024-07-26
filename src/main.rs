@@ -132,12 +132,6 @@ async fn run() {
     let db = Db::new().await;
     let nostr = RelayPool::new(USER_AGENT.to_string()).await;
     let mut relay_to_id_map = FxHashMap::default();
-    for (i, l) in INBOX_RELAYS.iter().chain(OUTBOX_RELAYS.iter()).enumerate() {
-        nostr
-            .add_relay(RelayId(i as u32), url::Url::parse(l).unwrap())
-            .await
-            .unwrap();
-    }
     let mut inbox_relays = FxHashSet::default();
     for l in &*INBOX_RELAYS {
         inbox_relays.insert(relay_to_id(&nostr, l, &mut relay_to_id_map).await);
