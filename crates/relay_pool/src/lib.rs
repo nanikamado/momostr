@@ -492,7 +492,54 @@ fn broadcast<RelayId>(tx: &broadcast::Sender<RelayOp<RelayId>>, message: RelayOp
     }
 }
 
+#[tracing::instrument(skip_all)]
+async fn first_request(
+    message: &Option<ClientMessage>,
+    url: &url::Url,
+    subs: &mut HashMap<FilterId, Vec<Filter>>,
+    user_agent: Arc<String>,
+    last_connection_time: &mut SystemTime,
+    connection_delay: &mut Duration,
+    auth: &mut Option<String>,
+) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Error> {
+    let (mut ws, r) = loop {
+        if SystemTime::now() < *last_connection_time + Duration::from_secs(60) {
+            error!("{url} is unstable. sleeping {connection_delay:?}");
+            tokio::time::sleep(*connection_delay).await;
+            *connection_delay = (*connection_delay * 2).min(Duration::from_secs(24 * 60 * 60 * 4));
+        } else {
+            *connection_delay = Duration::from_secs(5);
+        }
+        let mut req = url.into_client_request()?;
+        let headers = req.headers_mut();
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(user_agent.as_str()).unwrap(),
+        );
+        let r = connect_async(req).await;
+        *last_connection_time = SystemTime::now();
+        match r {
+            Ok((ws, r)) => break (ws, r),
+            Err(e) => {
+                error!("failed to connect to {url}: {e}");
+            }
+        }
+    };
+    debug!("connected to {url}: r = {r:?}, sub = {subs:?}");
+    for (id, filters) in subs.iter() {
+        let m = req_as_json(*id, filters);
+        debug!("{url} <== {m}");
+        ws.send(Message::Text(m)).await?;
+    }
+    if let Some(m) = message {
+        send_event(m, url, &mut ws, subs, auth).await?;
+    }
+    Ok(ws)
+}
+
 const TIMEOUT_DURATION: Duration = Duration::from_secs(60 * 3);
+
+struct UnhandledMessage(Arc<Event>, Option<Arc<nostr::Keys>>);
 
 async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
     url: url::Url,
@@ -500,52 +547,6 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
     tx_for_events: SenderWithId<RelayId>,
     user_agent: Arc<String>,
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
-    #[tracing::instrument(skip_all)]
-    async fn first_request(
-        message: &Option<ClientMessage>,
-        url: &url::Url,
-        subs: &mut HashMap<FilterId, Vec<Filter>>,
-        user_agent: Arc<String>,
-        last_connection_time: &mut SystemTime,
-        connection_delay: &mut Duration,
-        auth: &mut Option<String>,
-    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Error>
-    {
-        let (mut ws, r) = loop {
-            if SystemTime::now() < *last_connection_time + Duration::from_secs(60) {
-                error!("{url} is unstable. sleeping {connection_delay:?}");
-                tokio::time::sleep(*connection_delay).await;
-                *connection_delay =
-                    (*connection_delay * 2).min(Duration::from_secs(24 * 60 * 60 * 4));
-            } else {
-                *connection_delay = Duration::from_secs(5);
-            }
-            let mut req = url.into_client_request()?;
-            let headers = req.headers_mut();
-            headers.insert(
-                USER_AGENT,
-                HeaderValue::from_str(user_agent.as_str()).unwrap(),
-            );
-            let r = connect_async(req).await;
-            *last_connection_time = SystemTime::now();
-            match r {
-                Ok((ws, r)) => break (ws, r),
-                Err(e) => {
-                    error!("failed to connect to {url}: {e}");
-                }
-            }
-        };
-        debug!("connected to {url}: r = {r:?}, sub = {subs:?}");
-        for (id, filters) in subs.iter() {
-            let m = req_as_json(*id, filters);
-            debug!("{url} <== {m}");
-            ws.send(Message::Text(m)).await?;
-        }
-        if let Some(m) = message {
-            send_event(m, url, &mut ws, subs, auth).await?;
-        }
-        Ok(ws)
-    }
     let mut subs = HashMap::with_capacity(10);
     let mut auth = None;
     let mut last_connection_time = SystemTime::UNIX_EPOCH;
@@ -628,7 +629,7 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
             };
         } else {
             ws = first_request(
-                &unhandled_message.map(|(e, s)| ClientMessage::Event(e, s)),
+                &unhandled_message.map(|UnhandledMessage(e, s)| ClientMessage::Event(e, s)),
                 &url,
                 &mut subs,
                 user_agent.clone(),
@@ -648,13 +649,13 @@ async fn handle_ops(
     ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     subs: &mut HashMap<FilterId, Vec<Filter>>,
     auth: &mut Option<String>,
-) -> Result<(), Option<(Arc<Event>, Option<Arc<nostr::Keys>>)>> {
+) -> Result<(), Option<UnhandledMessage>> {
     if let Err(e) = send_event(&message, url, ws, subs, auth).await {
         use tokio_tungstenite::tungstenite::Error::*;
         match e {
             ConnectionClosed | AlreadyClosed | WriteBufferFull(_) => {
                 if let ClientMessage::Event(e, s) = message {
-                    Err(Some((e, s)))
+                    Err(Some(UnhandledMessage(e, s)))
                 } else {
                     Err(None)
                 }
