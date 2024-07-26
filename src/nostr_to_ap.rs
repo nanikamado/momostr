@@ -1048,7 +1048,10 @@ async fn get_ap_id_and_handle_from_public_key(
 }
 
 pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
-    let follow_list_old = state.db.get_followee_of_nostr(event.author_ref());
+    let follow_list_old = state
+        .db
+        .get_followee_of_nostr(event.author_ref())
+        .unwrap_or_default();
     let follow_list_new: FxHashSet<_> = event
         .tags
         .iter()
@@ -1065,18 +1068,26 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
             }
         })
         .collect();
-    let npub = event.author_ref().to_bech32().unwrap();
+    let follow_list_new = Arc::new(follow_list_new);
+    let new_follow = follow_list_new.difference(&follow_list_old).collect_vec();
+    let unfollow = follow_list_old.difference(&follow_list_new).collect_vec();
+    let author = event.author();
+    let npub = author.to_bech32().unwrap();
+    if !new_follow.is_empty() {
+        debug!("{npub} followed {new_follow:?}")
+    } else if !unfollow.is_empty() {
+        debug!("{npub} unfollowed {unfollow:?}")
+    } else {
+        return;
+    }
+    state
+        .db
+        .insert_followee_of_nostr(author, follow_list_new.clone());
     let author = format!("{USER_ID_PREFIX}{npub}",);
-    let mut changed = false;
-    for actor_id in &follow_list_new {
-        if follow_list_old
-            .as_ref()
-            .map(|a| a.contains(&**actor_id))
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        changed = true;
+    fn take_last(s: &str) -> &str {
+        &s[s.len().saturating_sub(20)..]
+    }
+    for actor_id in &new_follow {
         if let Ok(ActorOrProxied::Actor(a)) = state.get_actor_data(actor_id).await {
             if let Actor {
                 inbox: Some(inbox),
@@ -1091,10 +1102,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                         FollowActivity {
                             actor: &author,
                             object: id,
-                            id: Some(&format!(
-                                "{HTTPS_DOMAIN}/follow/{npub}/{}",
-                                utf8_percent_encode(id, NON_ALPHANUMERIC)
-                            )),
+                            id: Some(&format!("{HTTPS_DOMAIN}/follow/{npub}/{}", take_last(id))),
                         },
                         false,
                     )
@@ -1105,11 +1113,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
             }
         }
     }
-    for actor_id in follow_list_old.as_ref().into_iter().flat_map(|a| a.iter()) {
-        if follow_list_new.contains(actor_id) {
-            continue;
-        }
-        changed = true;
+    for actor_id in &unfollow {
         if let Ok(ActorOrProxied::Actor(a)) = state.get_actor_data(actor_id).await {
             if let Actor {
                 inbox: Some(inbox),
@@ -1117,7 +1121,7 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                 ..
             } = &*a
             {
-                let escaped_id = utf8_percent_encode(id, NON_ALPHANUMERIC);
+                let escaped_id = take_last(id);
                 if let Err(e) = state
                     .send_activity(
                         inbox,
@@ -1139,12 +1143,6 @@ pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
                 }
             }
         }
-    }
-    if changed {
-        debug!("updated follow list: {:?}", follow_list_new);
-        state
-            .db
-            .insert_followee_of_nostr(event.author(), follow_list_new.into());
     }
 }
 
