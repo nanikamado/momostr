@@ -510,7 +510,8 @@ async fn first_request(
         } else {
             *connection_delay = Duration::from_secs(5);
         }
-        let mut req = url.into_client_request()?;
+        // tokio_tungstenite::client_async(request, stream)
+        let mut req = url.as_str().into_client_request()?;
         let headers = req.headers_mut();
         headers.insert(
             USER_AGENT,

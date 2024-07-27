@@ -21,7 +21,7 @@ serde = { version = "1.0.196", features = ["derive", "rc"] }
 anyhow = "1.0.79"
 serde_json = "1.0.113"
 regex = "1.10.3"
-nostr_lib = { version = "0.31.1", package = "nostr" }
+nostr_lib = { version = "0.33.0", package = "nostr" }
 rsa = "0.9.6"
 sha3 = "0.10.8"
 rand = "0.8.5"
@@ -31,14 +31,14 @@ sha2 = "0.10.8"
 sigh = "1.0.2"
 reqwest = { version = "0.12.1", features = ["json"] }
 httpdate = "1.0.3"
-rustc-hash = "1.1.0"
+rustc-hash = "2.0.0"
 linkify = "0.10.0"
 futures-util = "0.3.30"
 url = "2.5.0"
 lru = "0.12.3"
 mediatype = { version = "0.19.18", features = ["serde"] }
 line-span = "0.1.5"
-cached = "0.51.3"
+cached = "0.53.1"
 chrono = { version="0.4.34", features = ["serde"] }
 async-recursion = "1.0.5"
 rocksdb = {version = "0.22.0", default-features = false }
@@ -46,7 +46,7 @@ dirs = "5.0.1"
 rmp-serde = "1.1.2"
 itertools = "0.13.0"
 percent-encoding = "2.3.1"
-tokio-tungstenite = "0.21.0"
+tokio-tungstenite = "0.23.1"
 html-escape = "0.2.13"
 parking_lot = { version = "0.12.2", features = ["deadlock_detection"] }
 backtrace = {version = "0.3.72", optional = true}

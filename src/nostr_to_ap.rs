@@ -893,8 +893,9 @@ impl Note {
             match t.as_standardized() {
                 Some(TagStandard::Event {
                     event_id,
-                    relay_url: _,
                     marker,
+                    relay_url: _,
+                    public_key: _,
                 }) => match marker {
                     Some(Marker::Reply) => reply = Some(*event_id),
                     Some(Marker::Root) => root = Some(*event_id),
@@ -982,6 +983,7 @@ impl Note {
         let nevent = Nip19Event {
             event_id: event.id,
             author: None,
+            kind: None,
             relays: OUTBOX_RELAYS_FOR_10002
                 .iter()
                 .map(|s| s.to_string())

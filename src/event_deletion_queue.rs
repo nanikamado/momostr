@@ -81,7 +81,7 @@ async fn delete_async(
         .collect_vec();
     let relays_len = relays.len();
     for (i, r) in relays.into_iter().enumerate() {
-        let mut req = r.clone().into_client_request()?;
+        let mut req = r.as_str().into_client_request()?;
         let headers = req.headers_mut();
         headers.insert(
             reqwest::header::USER_AGENT,

@@ -303,6 +303,7 @@ pub async fn http_post_inbox(
                                 event_id: event.event.id,
                                 relay_url: Some(state.relay_url[&event.relay_id].clone().into()),
                                 marker: None,
+                                public_key: Some(event.event.author()),
                             }
                             .into(),
                             Tag::public_key(event.event.pubkey),
@@ -563,19 +564,21 @@ async fn get_event_from_note<'a>(
                     event_id,
                     relay_url: _,
                     marker: Some(Marker::Root),
+                    public_key,
                 }) => {
-                    root = Some(*event_id);
+                    root = Some((*event_id, *public_key));
                 }
                 _ => (),
             }
         }
         tags.insert(Tag::public_key(e.event.pubkey));
-        if let Some(root) = root {
+        if let Some((root, public_key)) = root {
             tags.insert(
                 TagStandard::Event {
                     event_id: root,
                     relay_url: None,
                     marker: Some(Marker::Root),
+                    public_key,
                 }
                 .into(),
             );
@@ -584,6 +587,7 @@ async fn get_event_from_note<'a>(
                     event_id: e.event.id,
                     relay_url: None,
                     marker: Some(Marker::Reply),
+                    public_key: Some(e.event.author()),
                 }
                 .into(),
             );
@@ -593,6 +597,7 @@ async fn get_event_from_note<'a>(
                     event_id: e.event.id,
                     relay_url: None,
                     marker: Some(Marker::Root),
+                    public_key: Some(e.event.author()),
                 }
                 .into(),
             );

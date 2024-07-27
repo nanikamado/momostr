@@ -6,14 +6,14 @@ edition = "2021"
 [dependencies]
 futures-util = "0.3.30"
 lru = "0.12.2"
-nostr = "0.31.1"
+nostr = "0.33.0"
 tokio = { version = "1.37.0" }
 tokio-stream = { version = "0.1.15", features = ["sync"] }
-tokio-tungstenite = { version = "0.21.0", features = ["default", "native-tls"] }
+tokio-tungstenite = { version = "0.23.1", features = ["default", "native-tls"] }
 tracing = "0.1.40"
 url = "2.5.0"
 id-pool = { version = "0.2.2", features = ["u32"], default-features = false }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 itertools = "0.13.0"
-rustc-hash = "1.1.0"
+rustc-hash = "2.0.0"

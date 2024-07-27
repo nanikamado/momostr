@@ -185,17 +185,19 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
             event_id,
             relay_url: _,
             marker: Some(Marker::Root),
+            public_key,
         }) = t.as_standardized()
         {
-            root = Some(event_id);
+            root = Some((event_id, *public_key));
         }
     }
-    if let Some(e) = root {
+    if let Some((e, public_key)) = root {
         tags.push(
             TagStandard::Event {
                 event_id: *e,
                 relay_url: None,
                 marker: Some(Marker::Root),
+                public_key,
             }
             .into(),
         );
@@ -204,6 +206,7 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                 event_id: event.id,
                 relay_url: None,
                 marker: Some(Marker::Reply),
+                public_key: Some(event.author()),
             }
             .into(),
         );
@@ -213,6 +216,7 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
                 event_id: event.id,
                 relay_url: None,
                 marker: Some(Marker::Root),
+                public_key: Some(event.pubkey),
             }
             .into(),
         );
@@ -246,6 +250,7 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
         handle_command_from_nostr_account(state, author, &command).await
     };
     let bot_keys = Keys::new(BOT_SEC.clone());
+    #[allow(deprecated)]
     let e = EventBuilder::encrypted_direct_msg(&bot_keys, *author, response, Some(event.id))
         .unwrap()
         .custom_created_at(Timestamp::now().clamp(event.created_at + 1, event.created_at + 600))
