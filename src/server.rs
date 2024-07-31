@@ -49,7 +49,6 @@ pub struct AppState {
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
     pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,
     pub nostr_user_cache: Mutex<TimedSizedCache<nostr_lib::PublicKey, LazyUser>>,
-    pub relay_url: FxHashMap<RelayId, url::Url>,
     pub inbox_relays: Arc<FxHashSet<RelayId>>,
     pub outbox_relays: Arc<FxHashSet<RelayId>>,
     pub metadata_relays: Arc<FxHashSet<RelayId>>,

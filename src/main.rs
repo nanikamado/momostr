@@ -150,7 +150,6 @@ async fn run() {
         nostr,
         nostr_send_rate: Mutex::new(RateLimiter::new(5, Duration::from_secs(1))),
         nostr_subscribe_rate: Mutex::new(RateLimiter::new(50, Duration::from_secs(1))),
-        relay_url: relay_to_id_map.into_iter().map(|(k, v)| (v, k)).collect(),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),

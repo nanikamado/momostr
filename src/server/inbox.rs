@@ -301,7 +301,7 @@ pub async fn http_post_inbox(
                         [
                             TagStandard::Event {
                                 event_id: event.event.id,
-                                relay_url: Some(state.relay_url[&event.relay_id].clone().into()),
+                                relay_url: None,
                                 marker: None,
                                 public_key: Some(event.event.author()),
                             }
