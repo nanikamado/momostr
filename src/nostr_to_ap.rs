@@ -1155,7 +1155,7 @@ mod tests {
     use crate::event_deletion_queue::EventDeletionQueue;
     use crate::server::AppState;
     use crate::util::RateLimiter;
-    use crate::{RelayId, NOTE_ID_PREFIX, USER_AGENT};
+    use crate::{RelayId, BOT_SEC, NOTE_ID_PREFIX, USER_AGENT};
     use cached::TimedSizedCache;
     use itertools::Itertools;
     use lru::LruCache;
@@ -1197,8 +1197,12 @@ mod tests {
                     .collect_vec();
                 let nostr = RelayPool::new(USER_AGENT.to_string()).await;
                 let mut relays = FxHashSet::default();
+                let auth_master_key = Some(nostr_lib::Keys::new(BOT_SEC.clone()));
                 for (i, l) in relay_url.iter().enumerate() {
-                    nostr.add_relay(RelayId(i as u32), l.clone()).await.unwrap();
+                    nostr
+                        .add_relay(RelayId(i as u32), l.clone(), auth_master_key.clone())
+                        .await
+                        .unwrap();
                     relays.insert(RelayId(i as u32));
                 }
                 let relays = Arc::new(relays);

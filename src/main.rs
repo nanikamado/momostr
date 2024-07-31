@@ -121,7 +121,8 @@ async fn relay_to_id(
     } else {
         let id = RelayId(relay_to_id_map.len() as u32);
         relay_to_id_map.insert(l.clone(), id);
-        nostr.add_relay(id, l).await.unwrap();
+        let auth_master_key = Some(nostr_lib::Keys::new(BOT_SEC.clone()));
+        nostr.add_relay(id, l, auth_master_key).await.unwrap();
         id
     }
 }
