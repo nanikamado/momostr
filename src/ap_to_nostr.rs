@@ -787,8 +787,7 @@ async fn get_event_from_note<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::HEAD_MENTIONS_REGEX;
-    use crate::server::inbox::HASHTAG_LINK_REGEX;
+    use super::{HASHTAG_LINK_REGEX, HEAD_MENTIONS_REGEX};
     use chrono::{DateTime, Utc};
     use nostr_lib::{EventBuilder, FromBech32, SecretKey, Timestamp, ToBech32};
 

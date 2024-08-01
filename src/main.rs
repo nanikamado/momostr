@@ -1,4 +1,5 @@
 mod activity;
+mod ap_to_nostr;
 mod bot;
 mod db;
 mod error;

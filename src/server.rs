@@ -1,15 +1,14 @@
-mod inbox;
 mod nodeinfo;
 
 use crate::activity::{ActorOrProxied, Note, OrderedCollection, OrderedCollectionPage};
+use crate::ap_to_nostr::http_post_inbox;
+pub use crate::ap_to_nostr::{event_tag, InternalApId};
 use crate::db::Db;
 use crate::error::Error;
 use crate::event_deletion_queue::EventDeletionQueue;
 use crate::nostr::{get_nostr_user_data, NostrUser};
 use crate::nostr_to_ap::{replace_npub_with_ap_handle, Content};
 use crate::rsa_keys::RSA_PUBLIC_KEY_STRING;
-use crate::server::inbox::http_post_inbox;
-pub use crate::server::inbox::{event_tag, InternalApId};
 use crate::server::nodeinfo::well_known_nodeinfo;
 use crate::util::{Merge, RateLimiter};
 use crate::{RelayId, BIND_ADDRESS, DOMAIN, HTTPS_DOMAIN, OUTBOX_RELAYS_FOR_10002, USER_ID_PREFIX};
