@@ -347,7 +347,9 @@ pub async fn http_post_inbox(
         }
         ActivityForDeInner::Update { object } => {
             info!("update of actor");
-            state.update_actor_metadata(&object, None).await?;
+            state
+                .update_actor_metadata(&object, None, &mut Vec::new())
+                .await?;
         }
         ActivityForDeInner::Other(a) => {
             info!("not implemented {}", a);
@@ -433,7 +435,7 @@ pub fn event_tag(id: String, tags: impl IntoIterator<Item = Tag>) -> Vec<nostr_l
 async fn get_event_from_object_id<'a>(
     state: &'a AppState,
     url: String,
-    mut visited: Cow<'a, [String]>,
+    mut event_visited: Cow<'a, [String]>,
 ) -> Result<EventWithRelayId<RelayId>, NostrConversionError> {
     if let Some(event_id) = url.strip_prefix(NOTE_ID_PREFIX) {
         let event_id = nostr_lib::EventId::from_bech32(event_id)
@@ -443,10 +445,10 @@ async fn get_event_from_object_id<'a>(
             .await
             .ok_or(NostrConversionError::CouldNotGetEventFromNostr);
     }
-    if visited.contains(&url) {
+    if event_visited.contains(&url) {
         return Err(NostrConversionError::CyclicReference);
     }
-    if visited.len() > 100 {
+    if event_visited.len() > 100 {
         return Err(NostrConversionError::TooLongThread);
     }
     if let Some(e) = state
@@ -480,8 +482,8 @@ async fn get_event_from_object_id<'a>(
     else {
         return Err(NostrConversionError::IsProxied);
     };
-    visited.to_mut().push(url);
-    get_event_from_note(state, note, actor, visited)
+    event_visited.to_mut().push(url);
+    get_event_from_note(state, note, actor, event_visited)
         .await
         .map(|event| EventWithRelayId {
             event,
@@ -651,36 +653,7 @@ async fn get_event_from_note<'a>(
     } else {
         content
     };
-    let content = if parser::mention(content.as_ref()).is_ok() {
-        let mut c = String::with_capacity(content.len());
-        let mut content = content.as_ref();
-        while let Ok((skipped, m, r)) = parser::mention(content) {
-            let npub = if m.domain.map_or(false, |d| d == DOMAIN) {
-                PublicKey::from_bech32(m.username).ok()
-            } else if let Some(a) = if let Some(url) = m.url {
-                state.get_actor_data(url.trim_end()).await.ok()
-            } else {
-                None
-            } {
-                match a {
-                    ActorOrProxied::Proxied(npub) => PublicKey::from_bech32(&*npub).ok(),
-                    ActorOrProxied::Actor(actor) => Some(actor.npub),
-                }
-            } else {
-                None
-            };
-            if let Some(npub) = npub {
-                write!(&mut c, "{skipped}nostr:{}", &npub.to_bech32().unwrap()).unwrap();
-            } else {
-                write!(&mut c, "{}", &content[..content.len() - r.len()]).unwrap();
-            }
-            content = r;
-        }
-        write!(&mut c, "{}", &content).unwrap();
-        Cow::from(c)
-    } else {
-        content
-    };
+    let content = rewrite_mentions(state, content, &mut Vec::new()).await;
     let mut content = if note.attachment.is_empty() {
         content
     } else {
@@ -784,6 +757,59 @@ async fn get_event_from_note<'a>(
         .into_owned();
     send_event(state, event.clone(), Arc::new(keys), ap_id).await;
     Ok(event)
+}
+
+#[async_recursion::async_recursion]
+pub async fn rewrite_mentions<'a: 'async_recursion>(
+    state: &AppState,
+    content: Cow<'a, str>,
+    actor_visited: &mut Vec<String>,
+) -> Cow<'a, str> {
+    if parser::mention(content.as_ref()).is_err() {
+        return content;
+    }
+    let mut c = String::with_capacity(content.len());
+    let mut content = content.as_ref();
+    while let Ok((skipped, m, r)) = parser::mention(content) {
+        let npub = if m.domain.map_or(false, |d| d == DOMAIN) {
+            PublicKey::from_bech32(m.username).ok()
+        } else {
+            let tmp;
+            let url = if let Some(domain) = m.domain {
+                tmp = state
+                    .get_ap_id_from_webfinger(m.username, domain)
+                    .await
+                    .ok();
+                tmp.as_deref()
+            } else {
+                m.url
+            };
+            let actor = if let Some(url) = url {
+                state
+                    .get_actor_data_with_actor_visited(url.trim_end(), actor_visited)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+            if let Some(a) = actor {
+                match a {
+                    ActorOrProxied::Proxied(npub) => PublicKey::from_bech32(&*npub).ok(),
+                    ActorOrProxied::Actor(actor) => Some(actor.npub),
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(npub) = npub {
+            write!(&mut c, "{skipped}nostr:{}", &npub.to_bech32().unwrap()).unwrap();
+        } else {
+            write!(&mut c, "{}", &content[..content.len() - r.len()]).unwrap();
+        }
+        content = r;
+    }
+    write!(&mut c, "{}", &content).unwrap();
+    Cow::from(c)
 }
 
 #[cfg(test)]

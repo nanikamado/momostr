@@ -1,3 +1,4 @@
+use crate::ap_to_nostr::rewrite_mentions;
 use crate::error::Error;
 use crate::rsa_keys::{RSA_PRIVATE_KEY, RSA_PRIVATE_KEY_FOR_SIGH};
 use crate::server::{event_tag, AppState, WithContext};
@@ -577,7 +578,7 @@ impl AppState {
         cache: bool,
     ) -> Result<T, Error> {
         let t = if cache {
-            self.db.activity_cache.get(url.as_str())
+            self.db.string_cache.get(url.as_str())
         } else {
             None
         };
@@ -614,7 +615,7 @@ impl AppState {
                 .await?;
             debug!("{url} ==> {t}");
             if cache {
-                self.db.activity_cache.insert(url.as_str(), &t);
+                self.db.string_cache.insert(url.as_str(), &t);
             }
             t
         };
@@ -648,7 +649,20 @@ impl AppState {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_actor_data(&self, id: &str) -> Result<ActorOrProxied, Error> {
-        self.get_actor_data_and_if_its_new(id, None)
+        debug!("");
+        self.get_actor_data_and_if_its_new(id, None, &mut Vec::new())
+            .await
+            .map(|(a, _)| a)
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn get_actor_data_with_actor_visited(
+        &self,
+        id: &str,
+        actor_visited: &mut Vec<String>,
+    ) -> Result<ActorOrProxied, Error> {
+        debug!("");
+        self.get_actor_data_and_if_its_new(id, None, actor_visited)
             .await
             .map(|(a, _)| a)
     }
@@ -658,6 +672,7 @@ impl AppState {
         &self,
         id: &str,
         webfinger: Option<&str>,
+        visited: &mut Vec<String>,
     ) -> Result<(ActorOrProxied, bool), Error> {
         if let Some(npub) = id.strip_prefix(USER_ID_PREFIX) {
             let actor = ActorOrProxied::Proxied(Arc::new(npub.to_string()));
@@ -669,7 +684,9 @@ impl AppState {
             .map_err(|e| {
                 Error::BadRequest(Some(format!("could not get user data from {id}: {e:?}")))
             })?;
-        let new = self.update_actor_metadata(&actor, webfinger).await?;
+        let new = self
+            .update_actor_metadata(&actor, webfinger, visited)
+            .await?;
         Ok((actor, new))
     }
 
@@ -677,11 +694,29 @@ impl AppState {
         &self,
         actor: &ActorOrProxied,
         webfinger: Option<&str>,
+        visited: &mut Vec<String>,
     ) -> Result<bool, Error> {
-        static R: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[[:word:].-]+$").unwrap());
         let ActorOrProxied::Actor(actor) = &actor else {
             return Ok(false);
         };
+        if visited.contains(&actor.id) {
+            return Ok(false);
+        }
+        visited.push(actor.id.to_string());
+        let a = self
+            .update_actor_metadata_inner(actor, webfinger, visited)
+            .await;
+        visited.pop();
+        a
+    }
+
+    pub async fn update_actor_metadata_inner(
+        &self,
+        actor: &Actor,
+        webfinger: Option<&str>,
+        actor_visited: &mut Vec<String>,
+    ) -> Result<bool, Error> {
+        static R: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[[:word:].-]+$").unwrap());
         let nip05 = match (Url::parse(&actor.id)?.domain(), &actor.preferred_username) {
             (Some(domain), Some(name)) if R.is_match(name) => {
                 let n = format!(
@@ -711,24 +746,34 @@ impl AppState {
             _ => None,
         };
         let key = nostr_lib::Keys::new(actor.nsec.clone());
-        let mut about = actor.summary.clone();
         let mut first_property = true;
         let mut lud16 = None;
-        use std::fmt::Write;
-        for a in &actor.property_values {
-            if (a.name == "⚡" || a.name == "⚡\u{fe0f}") && a.value.contains('@') {
-                lud16 = Some(a.value.clone());
-            } else {
-                if first_property {
-                    first_property = false;
-                    if about.is_none() {
-                        about = Some(String::new());
+        let mut about = actor.summary.clone();
+        if !actor.property_values.is_empty() {
+            use std::fmt::Write;
+            let mut s = about.unwrap_or_default();
+            for a in &actor.property_values {
+                if (a.name == "⚡" || a.name == "⚡\u{fe0f}") && a.value.contains('@') {
+                    lud16 = Some(a.value.clone());
+                } else {
+                    if first_property {
+                        first_property = false;
+                        writeln!(&mut s, "\n")?;
                     }
-                    writeln!(&mut about.as_mut().unwrap(), "\n")?;
+                    writeln!(&mut s, "{}: {}", a.name, a.value)?;
                 }
-                writeln!(&mut about.as_mut().unwrap(), "{}: {}", a.name, a.value)?;
             }
+            about = Some(s)
         }
+        let about = if let Some(s) = about {
+            Some(
+                rewrite_mentions(self, Cow::Owned(s), actor_visited)
+                    .await
+                    .into_owned(),
+            )
+        } else {
+            None
+        };
         let metadata = EventBuilder::new(
             nostr_lib::Kind::Metadata,
             Metadata {
@@ -805,7 +850,11 @@ impl AppState {
         Ok(new)
     }
 
-    pub async fn get_ap_id_from_webfinger(&self, name: &str, host: &str) -> Result<String, Error> {
+    async fn get_ap_id_from_webfinger_without_cache(
+        &self,
+        name: &str,
+        host: &str,
+    ) -> Result<String, Error> {
         #[derive(Deserialize, Debug)]
         struct WebfingerResponse {
             links: Vec<WebfingerLink>,
@@ -848,6 +897,24 @@ impl AppState {
             .href
             .ok_or(Error::NotFound)?;
         Ok(id)
+    }
+
+    pub async fn get_ap_id_from_webfinger(&self, name: &str, host: &str) -> Result<String, Error> {
+        let name_host = format!("{name}@{host}");
+        if let Some(a) = self.db.string_cache.get(&name_host) {
+            return if a.is_empty() {
+                Err(Error::NotFound)
+            } else {
+                Ok(a)
+            };
+        }
+        let a = self
+            .get_ap_id_from_webfinger_without_cache(name, host)
+            .await;
+        self.db
+            .string_cache
+            .insert(&name_host, a.as_ref().map(|a| a.as_str()).unwrap_or(""));
+        a
     }
 }
 

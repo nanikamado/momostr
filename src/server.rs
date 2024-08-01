@@ -181,7 +181,7 @@ pub async fn nostr_json(
     let host = host.replace(".at_", "at_");
     let id = state.get_ap_id_from_webfinger(name_decoded, &host).await?;
     let (ActorOrProxied::Actor(actor), new) = state
-        .get_actor_data_and_if_its_new(&id, Some(name_decoded))
+        .get_actor_data_and_if_its_new(&id, Some(name_decoded), &mut Vec::new())
         .await?
     else {
         return Err(Error::NotFound);

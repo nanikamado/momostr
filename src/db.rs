@@ -1,5 +1,5 @@
 use crate::server::InternalApId;
-use actor_store::ActivityCache;
+use actor_store::StringCache;
 use lru::LruCache;
 use nostr_lib::key::PublicKey;
 use parking_lot::Mutex;
@@ -53,7 +53,7 @@ pub struct Db {
     ap_to_followees_cache: Mutex<LruCache<String, Arc<FxHashSet<nostr_lib::PublicKey>>>>,
     npub_to_ap_id: Rocks,
     npub_to_ap_id_cache: Mutex<LruCache<nostr_lib::PublicKey, Option<Arc<String>>>>,
-    pub activity_cache: ActivityCache,
+    pub string_cache: StringCache,
 }
 
 impl Db {
@@ -140,7 +140,7 @@ impl Db {
             ap_to_followees_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
             npub_to_ap_id,
             npub_to_ap_id_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
-            activity_cache: ActivityCache::new(config_dir, &opts),
+            string_cache: StringCache::new(config_dir, &opts),
         }
     }
 
@@ -407,32 +407,48 @@ impl Db {
 }
 
 mod actor_store {
+    use nostr_lib::types::Timestamp;
     use rocksdb::{Options, DB as Rocks};
     use std::path::Path;
     use std::time::Duration;
 
     #[derive(Debug)]
-    pub struct ActivityCache {
-        id_to_activity: Rocks,
+    pub struct StringCache {
+        cache: Rocks,
+        ttl: u64,
     }
 
-    impl ActivityCache {
+    impl StringCache {
         pub fn new(config_dir: &Path, opts: &Options) -> Self {
-            let id_to_activity = Rocks::open_with_ttl(
+            let ttl = 24 * 60 * 60;
+            let cache = Rocks::open_with_ttl(
                 opts,
-                config_dir.join("id_to_actor.rocksdb"),
-                Duration::from_secs(60 * 60),
+                config_dir.join("string_cache.rocksdb"),
+                Duration::from_secs(ttl),
             )
             .unwrap();
-            Self { id_to_activity }
+            Self { cache, ttl }
         }
 
-        pub fn insert(&self, id: &str, activity: &str) {
-            self.id_to_activity.put(id, activity.as_bytes()).unwrap();
+        pub fn insert(&self, key: &str, value: &str) {
+            let mut v = Vec::with_capacity(value.len() + 8);
+            let expiration_time = Timestamp::now().as_u64() + self.ttl;
+            v.extend_from_slice(value.as_bytes());
+            v.extend_from_slice(&expiration_time.to_be_bytes());
+            self.cache.put(key, &v).unwrap();
         }
 
         pub fn get(&self, id: &str) -> Option<String> {
-            String::from_utf8(self.id_to_activity.get(id).unwrap()?).ok()
+            let mut v = self.cache.get(id).unwrap()?;
+            let l = v.len() - 8;
+            let expiration_time = u64::from_be_bytes(v[l..].try_into().unwrap());
+            v.truncate(l);
+            let now = Timestamp::now().as_u64();
+            if expiration_time < now {
+                None
+            } else {
+                String::from_utf8(v).ok()
+            }
         }
     }
 }
