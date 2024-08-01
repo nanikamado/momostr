@@ -571,50 +571,68 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn get_activity_json<T: DeserializeOwned>(&self, url: &Url) -> Result<T, Error> {
-        let digest = sha2::Sha256::digest([]);
-        let digest = base64::prelude::BASE64_STANDARD.encode(digest);
-        let mut r = Request::builder()
-            .method(Method::GET)
-            .uri(url.as_str())
-            .header(axum::http::header::ACCEPT, "application/activity+json")
-            .header(axum::http::header::USER_AGENT, &*USER_AGENT)
-            .header("host", url.host().unwrap().to_string())
-            .header(
-                "date",
-                httpdate::HttpDate::from(std::time::SystemTime::now()).to_string(),
-            )
-            .header("digest", format!("SHA-256={digest}"))
-            // Content-Type doesn't have to be text/plain but should not be empty to work with Mastodon
-            .header(axum::http::header::CONTENT_TYPE, "text/plain")
-            .body(())
-            .unwrap();
-        SigningConfig::new(RsaSha256, &RSA_PRIVATE_KEY_FOR_SIGH, &*KEY_ID)
-            .sign(&mut r)
-            .unwrap();
-        let t = self
-            .http_client
-            .get(url.as_str())
-            .headers(r.headers().clone())
-            .send()
-            .await?
-            .text()
-            .await?;
-        debug!("{url} ==> {t}");
+    async fn get_activity_json_without_retry<T: DeserializeOwned>(
+        &self,
+        url: &Url,
+        cache: bool,
+    ) -> Result<T, Error> {
+        let t = if cache {
+            self.db.activity_cache.get(url.as_str())
+        } else {
+            None
+        };
+        let t = if let Some(t) = t {
+            t
+        } else {
+            let digest = sha2::Sha256::digest([]);
+            let digest = base64::prelude::BASE64_STANDARD.encode(digest);
+            let mut r = Request::builder()
+                .method(Method::GET)
+                .uri(url.as_str())
+                .header(axum::http::header::ACCEPT, "application/activity+json")
+                .header(axum::http::header::USER_AGENT, &*USER_AGENT)
+                .header("host", url.host().unwrap().to_string())
+                .header(
+                    "date",
+                    httpdate::HttpDate::from(std::time::SystemTime::now()).to_string(),
+                )
+                .header("digest", format!("SHA-256={digest}"))
+                // Content-Type doesn't have to be text/plain but should not be empty to work with Mastodon
+                .header(axum::http::header::CONTENT_TYPE, "text/plain")
+                .body(())
+                .unwrap();
+            SigningConfig::new(RsaSha256, &RSA_PRIVATE_KEY_FOR_SIGH, &*KEY_ID)
+                .sign(&mut r)
+                .unwrap();
+            let t = self
+                .http_client
+                .get(url.as_str())
+                .headers(r.headers().clone())
+                .send()
+                .await?
+                .text()
+                .await?;
+            debug!("{url} ==> {t}");
+            if cache {
+                self.db.activity_cache.insert(url.as_str(), &t);
+            }
+            t
+        };
         Ok(serde_json::from_str(&t)?)
     }
 
-    pub async fn get_activity_json_with_retry<T: DeserializeOwned>(
+    pub async fn get_activity_json<T: DeserializeOwned>(
         &self,
         url: &Url,
+        cache: bool,
     ) -> Result<T, Error> {
-        match self.get_activity_json(url).await {
+        match self.get_activity_json_without_retry(url, cache).await {
             Ok(actor) => Ok(actor),
             Err(e) => {
                 warn!("could not get activity from {url}: {e:?}");
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 debug!("retrying ...");
-                match self.get_activity_json(url).await {
+                match self.get_activity_json_without_retry(url, cache).await {
                     Ok(actor) => {
                         debug!("retry succeeded");
                         Ok(actor)
@@ -641,24 +659,17 @@ impl AppState {
         id: &str,
         webfinger: Option<&str>,
     ) -> Result<(ActorOrProxied, bool), Error> {
-        {
-            if let Some(actor) = self.actor_cache.lock().get(id) {
-                return Ok((actor.clone(), false));
-            }
-        }
         if let Some(npub) = id.strip_prefix(USER_ID_PREFIX) {
             let actor = ActorOrProxied::Proxied(Arc::new(npub.to_string()));
-            self.actor_cache.lock().push(id.to_string(), actor.clone());
             return Ok((actor, false));
         }
         let actor: ActorOrProxied = self
-            .get_activity_json_with_retry(&id.parse::<Url>()?)
+            .get_activity_json(&id.parse::<Url>()?, true)
             .await
             .map_err(|e| {
                 Error::BadRequest(Some(format!("could not get user data from {id}: {e:?}")))
             })?;
         let new = self.update_actor_metadata(&actor, webfinger).await?;
-        self.actor_cache.lock().push(id.to_string(), actor.clone());
         Ok((actor, new))
     }
 

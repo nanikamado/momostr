@@ -458,9 +458,10 @@ async fn get_event_from_object_id<'a>(
         }
     }
     let note: NoteForDe = state
-        .get_activity_json_with_retry(
+        .get_activity_json(
             &url.parse::<Url>()
                 .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?,
+            false,
         )
         .await
         .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?;

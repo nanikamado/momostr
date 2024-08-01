@@ -1,4 +1,5 @@
 use crate::server::InternalApId;
+use actor_store::ActivityCache;
 use lru::LruCache;
 use nostr_lib::key::PublicKey;
 use parking_lot::Mutex;
@@ -52,6 +53,7 @@ pub struct Db {
     ap_to_followees_cache: Mutex<LruCache<String, Arc<FxHashSet<nostr_lib::PublicKey>>>>,
     npub_to_ap_id: Rocks,
     npub_to_ap_id_cache: Mutex<LruCache<nostr_lib::PublicKey, Option<Arc<String>>>>,
+    pub activity_cache: ActivityCache,
 }
 
 impl Db {
@@ -138,6 +140,7 @@ impl Db {
             ap_to_followees_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
             npub_to_ap_id,
             npub_to_ap_id_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
+            activity_cache: ActivityCache::new(config_dir, &opts),
         }
     }
 
@@ -400,5 +403,36 @@ impl Db {
     pub fn restart_ap(&self, id: &str) {
         self.stopped_ap_on_memory.lock().remove(id);
         self.stopped_ap.delete(id.as_bytes()).unwrap();
+    }
+}
+
+mod actor_store {
+    use rocksdb::{Options, DB as Rocks};
+    use std::path::Path;
+    use std::time::Duration;
+
+    #[derive(Debug)]
+    pub struct ActivityCache {
+        id_to_activity: Rocks,
+    }
+
+    impl ActivityCache {
+        pub fn new(config_dir: &Path, opts: &Options) -> Self {
+            let id_to_activity = Rocks::open_with_ttl(
+                opts,
+                config_dir.join("id_to_actor.rocksdb"),
+                Duration::from_secs(60 * 60),
+            )
+            .unwrap();
+            Self { id_to_activity }
+        }
+
+        pub fn insert(&self, id: &str, activity: &str) {
+            self.id_to_activity.put(id, activity.as_bytes()).unwrap();
+        }
+
+        pub fn get(&self, id: &str) -> Option<String> {
+            String::from_utf8(self.id_to_activity.get(id).unwrap()?).ok()
+        }
     }
 }

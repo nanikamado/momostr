@@ -46,7 +46,6 @@ pub struct AppState {
     pub nostr_subscribe_rate: Mutex<RateLimiter>,
     pub http_client: reqwest::Client,
     pub note_cache: Mutex<LruCache<EventId, LazyNote>>,
-    pub actor_cache: Mutex<LruCache<String, ActorOrProxied>>,
     pub nostr_user_cache: Mutex<TimedSizedCache<nostr_lib::PublicKey, LazyUser>>,
     pub inbox_relays: Arc<FxHashSet<RelayId>>,
     pub outbox_relays: Arc<FxHashSet<RelayId>>,

@@ -154,7 +154,6 @@ async fn run() {
         nostr_subscribe_rate: Mutex::new(RateLimiter::new(50, Duration::from_secs(1))),
         http_client: http_client.clone(),
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
-        actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         nostr_user_cache: Mutex::new(TimedSizedCache::with_size_and_lifespan(1_000, 60 * 10)),
         db,
         inbox_relays,

@@ -734,10 +734,7 @@ async fn media<'a>(
 async fn get_url_from_ap_id<'a>(state: &AppState, id: &'a str) -> Cow<'a, str> {
     async fn get_url_from_ap_id_aux(state: &AppState, id: &str) -> Option<String> {
         let id = id.parse::<Url>().ok()?;
-        let note = state
-            .get_activity_json_with_retry::<NoteForDe>(&id)
-            .await
-            .ok()?;
+        let note = state.get_activity_json::<NoteForDe>(&id, true).await.ok()?;
         note.url.url
     }
     if let Some(url) = get_url_from_ap_id_aux(state, id).await {
@@ -925,10 +922,6 @@ impl Note {
                     uppercase: false,
                     ..
                 }) => {
-                    if author_opt_outed && state.db.get_ap_id_of_npub(public_key).is_some() {
-                        // TODO: notify the author that their mention doesn't mirrored
-                        return None;
-                    }
                     if !quote
                         .as_ref()
                         .map_or(false, |a| &a.author_npub == public_key)
@@ -1217,7 +1210,6 @@ mod tests {
                     )),
                     http_client: http_client.clone(),
                     note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
-                    actor_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1000).unwrap())),
                     nostr_user_cache: Mutex::new(TimedSizedCache::with_size_and_lifespan(
                         1000,
                         60 * 10,
