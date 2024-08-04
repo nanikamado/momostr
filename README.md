@@ -6,6 +6,6 @@ A WIP bridge between Nostr and Fediverse.
 
 Read the description at https://momostr.pink.
 
-## Related Project
+## Similar Project
 
 - Mostr: https://gitlab.com/soapbox-pub/mostr
