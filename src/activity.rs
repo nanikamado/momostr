@@ -314,6 +314,7 @@ pub struct NoteForDe {
     pub id: String,
     pub content: String,
     #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
     pub source: Option<Source>,
     pub published: DateTime<Utc>,
     pub in_reply_to: Option<String>,
@@ -337,7 +338,6 @@ pub struct NoteForDe {
     #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
     pub cc: Vec<String>,
-    #[serde_as(deserialize_as = "DefaultOnError")]
     pub sensitive: Option<bool>,
     pub summary: Option<String>,
 }
@@ -1320,6 +1320,12 @@ mod tests {
     #[test]
     fn note_de_3() {
         let a = r###"{"@context":["https://join-lemmy.org/context.json","https://www.w3.org/ns/activitystreams"],"type":"Page","id":"https://lemmy.zip/post/aaaaaaaaa","attributedTo":"https://lemmy.zip/u/aaaaaaaaa","to":["https://lemmy.world/c/aaaaaaaaa","https://www.w3.org/ns/activitystreams#Public"],"name":"aaaaaaaaa","cc":[],"content":"<h2>aaaaaaaaa &amp; aaaaaaaaa</h2>\n<p>aaaaaaaaa, <em>aaaaaaaaa</em>, aaaaaaaaa <strong>aaaaaaaaa &amp; aaaaaaaaa</strong>, aaaaaaaaa <a href=\"https://x.com/aaaaaaaaa/status/aaaaaaaaa\" rel=\"nofollow\">aaaaaaaaa</a>.</p>\n<p><strong>aaaaaaaaa</strong>:</p>\n<ul>\n<li>aaaaaaaaa</li>\n<li>aaaaaaaaa.</li>\n</ul>\n<p><strong>aaaaaaaaa</strong>:\naaaaaaaaa</p>\n<hr />\n<p>aaaaaaaaa</p>\n","mediaType":"text/html","source":{"content":"## aaaaaaaaa ##\n\naaaaaaaaa","mediaType":"text/markdown"},"attachment":[{"href":"https://aaaaaaaaa.com/aaaaaaaaa","mediaType":"text/html; charset=utf-8","type":"Link"}],"image":{"type":"Image","url":"https://lemmy.zip/pictrs/image/aaaaaaaaa.webp"},"sensitive":false,"published":"2024-08-02T08:26:41.080977Z","language":{"identifier":"en","name":"English"},"audience":"https://lemmy.world/c/retrogaming","tag":[{"href":"https://lemmy.zip/post/aaaaaaaaa","name":"#aaaaaaaaa","type":"Hashtag"}]}"###;
+        let _: NoteForDe = serde_json::from_str(a).unwrap();
+    }
+
+    #[test]
+    fn note_de_4() {
+        let a = r###"{"type":"Note","id":"https://example.com/aaaaaaaaa","attributedTo":"https://example.com/aaaaaaaaa","to":["https://www.w3.org/ns/activitystreams#Public"],"name":"aaaaaaaaa","cc":[],"content":"<h2>aaaaaaaaa &amp; aaaaaaaaa</h2>\n<p>aaaaaaaaa, <em>aaaaaaaaa</em>, aaaaaaaaa <strong>aaaaaaaaa &amp; aaaaaaaaa</strong>, aaaaaaaaa <a href=\"https://x.com/aaaaaaaaa/status/aaaaaaaaa\" rel=\"nofollow\">aaaaaaaaa</a>.</p>\n<p><strong>aaaaaaaaa</strong>:</p>\n<ul>\n<li>aaaaaaaaa</li>\n<li>aaaaaaaaa.</li>\n</ul>\n<p><strong>aaaaaaaaa</strong>:\naaaaaaaaa</p>\n<hr />\n<p>aaaaaaaaa</p>\n","mediaType":"text/html","source":"aaa","attachment":[{"href":"https://aaaaaaaaa.com/aaaaaaaaa","mediaType":"text/html; charset=utf-8","type":"Link"}],"image":{"type":"Image","url":"https://lemmy.zip/pictrs/image/aaaaaaaaa.webp"},"sensitive":false,"published":"2024-08-02T08:26:41.080977Z","language":{"identifier":"en","name":"English"},"audience":"https://lemmy.world/c/retrogaming","tag":[{"href":"https://lemmy.zip/post/aaaaaaaaa","name":"#aaaaaaaaa","type":"Hashtag"}]}"###;
         let _: NoteForDe = serde_json::from_str(a).unwrap();
     }
 
