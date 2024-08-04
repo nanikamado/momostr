@@ -519,6 +519,11 @@ pub struct OrderedCollectionPage<'a> {
     pub total_items: usize,
 }
 
+pub struct MaybeFromCache<T> {
+    pub value: T,
+    pub from_cache: bool,
+}
+
 impl AppState {
     #[tracing::instrument(skip_all)]
     pub async fn send_activity<S: AsRef<str>, A: Serialize>(
@@ -576,9 +581,13 @@ impl AppState {
         &self,
         url: &Url,
         cache: bool,
-    ) -> Result<T, Error> {
+    ) -> Result<MaybeFromCache<T>, Error> {
+        let mut from_cache = false;
         let t = if cache {
-            self.db.string_cache.get(url.as_str())
+            self.db
+                .string_cache
+                .get(url.as_str())
+                .inspect(|_| from_cache = true)
         } else {
             None
         };
@@ -619,14 +628,17 @@ impl AppState {
             }
             t
         };
-        Ok(serde_json::from_str(&t)?)
+        Ok(MaybeFromCache {
+            value: serde_json::from_str(&t)?,
+            from_cache,
+        })
     }
 
     pub async fn get_activity_json<T: DeserializeOwned>(
         &self,
         url: &Url,
         cache: bool,
-    ) -> Result<T, Error> {
+    ) -> Result<MaybeFromCache<T>, Error> {
         match self.get_activity_json_without_retry(url, cache).await {
             Ok(actor) => Ok(actor),
             Err(e) => {
@@ -650,63 +662,62 @@ impl AppState {
     #[tracing::instrument(skip(self))]
     pub async fn get_actor_data(&self, id: &str) -> Result<ActorOrProxied, Error> {
         debug!("");
-        self.get_actor_data_and_if_its_new(id, None, &mut Vec::new())
+        self.get_actor_data_with_opts(id, None, &mut Default::default())
             .await
-            .map(|(a, _)| a)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, actor_visited))]
     pub async fn get_actor_data_with_actor_visited(
         &self,
         id: &str,
-        actor_visited: &mut Vec<String>,
+        actor_visited: &mut FxHashSet<String>,
     ) -> Result<ActorOrProxied, Error> {
         debug!("");
-        self.get_actor_data_and_if_its_new(id, None, actor_visited)
-            .await
-            .map(|(a, _)| a)
+        self.get_actor_data_with_opts(id, None, actor_visited).await
     }
 
-    #[tracing::instrument(skip(self))]
-    pub async fn get_actor_data_and_if_its_new(
+    #[tracing::instrument(skip(self, actor_visited))]
+    pub async fn get_actor_data_with_opts(
         &self,
         id: &str,
         webfinger: Option<&str>,
-        visited: &mut Vec<String>,
-    ) -> Result<(ActorOrProxied, bool), Error> {
+        actor_visited: &mut FxHashSet<String>,
+    ) -> Result<ActorOrProxied, Error> {
         if let Some(npub) = id.strip_prefix(USER_ID_PREFIX) {
             let actor = ActorOrProxied::Proxied(Arc::new(npub.to_string()));
-            return Ok((actor, false));
+            return Ok(actor);
         }
-        let actor: ActorOrProxied = self
+        let actor: MaybeFromCache<ActorOrProxied> = self
             .get_activity_json(&id.parse::<Url>()?, true)
             .await
             .map_err(|e| {
                 Error::BadRequest(Some(format!("could not get user data from {id}: {e:?}")))
             })?;
-        let new = self
-            .update_actor_metadata(&actor, webfinger, visited)
-            .await?;
-        Ok((actor, new))
+        if !actor.from_cache {
+            self.update_actor_metadata(&actor.value, webfinger, actor_visited)
+                .await?;
+        }
+        Ok(actor.value)
     }
 
     pub async fn update_actor_metadata(
         &self,
         actor: &ActorOrProxied,
         webfinger: Option<&str>,
-        visited: &mut Vec<String>,
+        visited: &mut FxHashSet<String>,
     ) -> Result<bool, Error> {
         let ActorOrProxied::Actor(actor) = &actor else {
             return Ok(false);
         };
-        if visited.contains(&actor.id) {
+        if visited.contains(&actor.id) || visited.len() > 100 {
             return Ok(false);
         }
-        visited.push(actor.id.to_string());
+        let id = actor.id.to_string();
+        visited.insert(id.clone());
         let a = self
             .update_actor_metadata_inner(actor, webfinger, visited)
             .await;
-        visited.pop();
+        visited.remove(&id);
         a
     }
 
@@ -714,7 +725,7 @@ impl AppState {
         &self,
         actor: &Actor,
         webfinger: Option<&str>,
-        actor_visited: &mut Vec<String>,
+        actor_visited: &mut FxHashSet<String>,
     ) -> Result<bool, Error> {
         static R: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[[:word:].-]+$").unwrap());
         let nip05 = match (Url::parse(&actor.id)?.domain(), &actor.preferred_username) {

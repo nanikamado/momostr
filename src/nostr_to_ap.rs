@@ -734,7 +734,11 @@ async fn media<'a>(
 async fn get_url_from_ap_id<'a>(state: &AppState, id: &'a str) -> Cow<'a, str> {
     async fn get_url_from_ap_id_aux(state: &AppState, id: &str) -> Option<String> {
         let id = id.parse::<Url>().ok()?;
-        let note = state.get_activity_json::<NoteForDe>(&id, true).await.ok()?;
+        let note = state
+            .get_activity_json::<NoteForDe>(&id, true)
+            .await
+            .ok()?
+            .value;
         note.url.url
     }
     if let Some(url) = get_url_from_ap_id_aux(state, id).await {

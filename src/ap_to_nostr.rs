@@ -347,9 +347,12 @@ pub async fn http_post_inbox(
         }
         ActivityForDeInner::Update { object } => {
             info!("update of actor");
-            state
-                .update_actor_metadata(&object, None, &mut Vec::new())
-                .await?;
+            if let ActorOrProxied::Actor(actor) = &object {
+                state.db.string_cache.remove(&actor.id);
+                state
+                    .update_actor_metadata(&object, None, &mut Default::default())
+                    .await?;
+            };
         }
         ActivityForDeInner::Other(a) => {
             info!("not implemented {}", a);
@@ -466,7 +469,8 @@ async fn get_event_from_object_id<'a>(
             false,
         )
         .await
-        .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?;
+        .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?
+        .value;
     if let Some(event_id) = &note.url.proxied_from {
         let event_id = nostr_lib::EventId::from_bech32(event_id)
             .map_err(|_| NostrConversionError::InvalidEventId)?;
@@ -652,7 +656,7 @@ async fn get_event_from_note<'a>(
     } else {
         content
     };
-    let content = rewrite_mentions(state, content, &mut Vec::new()).await;
+    let content = rewrite_mentions(state, content, &mut Default::default()).await;
     let mut content = if note.attachment.is_empty() {
         content
     } else {
@@ -762,7 +766,7 @@ async fn get_event_from_note<'a>(
 pub async fn rewrite_mentions<'a: 'async_recursion>(
     state: &AppState,
     content: Cow<'a, str>,
-    actor_visited: &mut Vec<String>,
+    actor_visited: &mut FxHashSet<String>,
 ) -> Cow<'a, str> {
     if parser::mention(content.as_ref()).is_err() {
         return content;

@@ -420,7 +420,7 @@ mod actor_store {
 
     impl StringCache {
         pub fn new(config_dir: &Path, opts: &Options) -> Self {
-            let ttl = 24 * 60 * 60;
+            let ttl = 7 * 24 * 60 * 60;
             let cache = Rocks::open_with_ttl(
                 opts,
                 config_dir.join("string_cache.rocksdb"),
@@ -432,23 +432,27 @@ mod actor_store {
 
         pub fn insert(&self, key: &str, value: &str) {
             let mut v = Vec::with_capacity(value.len() + 8);
-            let expiration_time = Timestamp::now().as_u64() + self.ttl;
+            let now = Timestamp::now().as_u64();
             v.extend_from_slice(value.as_bytes());
-            v.extend_from_slice(&expiration_time.to_be_bytes());
+            v.extend_from_slice(&now.to_be_bytes());
             self.cache.put(key, &v).unwrap();
         }
 
         pub fn get(&self, id: &str) -> Option<String> {
             let mut v = self.cache.get(id).unwrap()?;
             let l = v.len() - 8;
-            let expiration_time = u64::from_be_bytes(v[l..].try_into().unwrap());
+            let inserted = u64::from_be_bytes(v[l..].try_into().unwrap());
             v.truncate(l);
             let now = Timestamp::now().as_u64();
-            if expiration_time < now {
+            if inserted + self.ttl < now {
                 None
             } else {
                 String::from_utf8(v).ok()
             }
+        }
+
+        pub fn remove(&self, key: &str) {
+            self.cache.delete(key).unwrap();
         }
     }
 }

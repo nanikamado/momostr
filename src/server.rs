@@ -33,7 +33,6 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::{Arc, LazyLock as Lazy};
-use std::time::Duration;
 use tracing::{debug, info};
 
 type LazyNote = Arc<tokio::sync::OnceCell<Option<EventWithRelayId<RelayId>>>>;
@@ -180,15 +179,12 @@ pub async fn nostr_json(
     let (name_decoded, host) = name.rsplit_once("_at_").ok_or_else(|| Error::NotFound)?;
     let host = host.replace(".at_", "at_");
     let id = state.get_ap_id_from_webfinger(name_decoded, &host).await?;
-    let (ActorOrProxied::Actor(actor), new) = state
-        .get_actor_data_and_if_its_new(&id, Some(name_decoded), &mut Vec::new())
+    let ActorOrProxied::Actor(actor) = state
+        .get_actor_data_with_opts(&id, Some(name_decoded), &mut FxHashSet::default())
         .await?
     else {
         return Err(Error::NotFound);
     };
-    if new {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
     let mut r = Json(json!({
         "names": {
             name: actor.npub,
