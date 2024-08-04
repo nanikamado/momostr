@@ -17,6 +17,7 @@ use rustc_hash::FxHashSet;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use serde_with::{serde_as, DefaultOnError, VecSkipError};
 use sha2::digest::FixedOutput;
 use sha2::Digest;
 use sha3::Sha3_256;
@@ -306,16 +307,20 @@ pub struct ActivityForDe<'a> {
     pub activity_inner: ActivityForDeInner<'a>,
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteForDe {
     pub id: String,
     pub content: String,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub source: Option<Source>,
     pub published: DateTime<Utc>,
     pub in_reply_to: Option<String>,
+    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
     pub tag: Vec<NoteTagForDe>,
+    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
     pub attachment: Vec<AttachedImage>,
     #[serde(default)]
@@ -326,10 +331,13 @@ pub struct NoteForDe {
     // threads.net only provides `_misskey_quote`
     #[serde(rename = "_misskey_quote")]
     pub misskey_quote: Option<String>,
+    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
     pub to: Vec<String>,
+    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
     pub cc: Vec<String>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub sensitive: Option<bool>,
     pub summary: Option<String>,
 }
@@ -344,19 +352,9 @@ pub struct Source {
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type")]
 pub enum NoteTagForDe {
-    Mention {
-        href: String,
-        name: String,
-    },
-    Emoji {
-        name: String,
-        icon: ImageForDe,
-    },
-    Hashtag {
-        name: String,
-    },
-    #[serde(untagged)]
-    Other(IgnoredAny),
+    Mention { href: String, name: String },
+    Emoji { name: String, icon: ImageForDe },
+    Hashtag { name: String },
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -364,6 +362,7 @@ pub struct ImageForDe {
     pub url: String,
 }
 
+#[serde_as]
 #[derive(Deserialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ActivityForDeInner<'a> {
@@ -381,6 +380,7 @@ pub enum ActivityForDeInner<'a> {
         content: Option<Cow<'a, str>>,
         id: Cow<'a, str>,
         #[serde(default)]
+        #[serde_as(as = "VecSkipError<_>")]
         tag: Vec<NoteTagForDe>,
     },
     Announce {
@@ -1002,6 +1002,7 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
     }
 }
 
+#[serde_as]
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ActorForParse {
@@ -1018,16 +1019,18 @@ pub struct ActorForParse {
     url: ActorUrl,
     proxy_of: Option<ProxyOf>,
     #[serde(default)]
+    #[serde_as(as = "VecSkipError<_>")]
     tag: Vec<NoteTagForDe>,
     #[serde(default)]
     attachment: Vec<ActorAttachment>,
 }
 
+#[serde_as]
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum ListOrSingle<T> {
     Single(T),
-    Vec(Vec<OptionForDe<T>>),
+    Vec(#[serde_as(as = "VecSkipError<_>")] Vec<T>),
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -1050,7 +1053,7 @@ impl<T> ListOrSingle<T> {
     fn get_first(self) -> Option<T> {
         match self {
             ListOrSingle::Single(a) => Some(a),
-            ListOrSingle::Vec(a) => a.into_iter().filter_map(|a| a.into()).next(),
+            ListOrSingle::Vec(a) => a.into_iter().next(),
         }
     }
 }
@@ -1118,10 +1121,11 @@ pub struct ActorUrl {
     pub proxied_from: Option<String>,
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum ActorUrlForDe {
-    Array(Vec<LinkForDe>),
+    Array(#[serde_as(as = "VecSkipError<_>")] Vec<LinkForDe>),
     Single(LinkForDe),
 }
 
@@ -1183,10 +1187,11 @@ pub struct AttachedImage {
     pub media_type: Option<String>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct PublicKeyJsonInner {
     #[serde(deserialize_with = "deserialize_pem")]
+    #[serde(serialize_with = "serialize_pem")]
     public_key_pem: sigh::PublicKey,
 }
 
@@ -1212,7 +1217,14 @@ where
     deserializer.deserialize_str(Visitor)
 }
 
-#[derive(Deserialize, Clone, Debug)]
+fn serialize_pem<S>(key: &sigh::PublicKey, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&key.to_pem().unwrap())
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 struct EndPoints {
     shared_inbox: Option<Url>,
@@ -1289,6 +1301,18 @@ mod tests {
     }
 
     #[test]
+    fn note_de_2() {
+        let a = r##"{"@context":["https://www.w3.org/ns/activitystreams",{"_misskey_quote":"https://misskey-hub.net/ns#_misskey_quote"}],"_misskey_quote":"https://bsky.brid.gy/convert/ap/at://did:plc:aaaaaaaaaaaa/app.bsky.feed.post/aaaaaaaaaaaa","attributedTo":"https://bsky.brid.gy/ap/did:plc:aaaaaaaaaaaaaaaaaaaaa","content":"<p>aaaaaaaaaaaaaaaaaaaaa.<br><br>RE: <a href=\"https://bsky.app/profile/did:plc:aaaaaaaaaaaaaaaaaaaaa/post/aaaaaaaaaaaaaaaaaaaaa\">https://bsky.app/profile/did:plc:aaaaaaaaaaaaaaaaaaaaa/post/aaaaaaaaaaaaaaaaaaaaa</a></p>","contentMap":{"en":"aaaaaaaaaaaaaaaaaaaaa."},"content_is_html":true,"id":"https://bsky.brid.gy/convert/ap/at://did:plc:aaaaaaaaaaaaaaaaaaaaa/app.bsky.feed.post/aaaaaaaaaaaaaaaaaaaaa","published":"2024-08-02T04:13:55.308Z","quoteUrl":"https://bsky.brid.gy/convert/ap/at://did:plc:aaaaaaaaaaaaaaaaaaaaa/app.bsky.feed.post/aaaaaaaaaaaaaaaaaaaaa","tag":[{"href":"https://bsky.brid.gy/convert/ap/at://did:plc:aaaaaaaaaaaaaaaaaaaaa/app.bsky.feed.post/aaaaaaaaaaaaaaaaaaaaa","mediaType":"application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\"","name":"RE: https://bsky.app/profile/did:plc:aaaaaaaaaaaaaaaaaaaaa/post/aaaaaaaaaaaaaaaaaaaaa","type":"Link"}],"to":["https://www.w3.org/ns/activitystreams#Public"],"type":"Note","url":"https://bsky.brid.gy/r/https://bsky.app/profile/did:plc:aaaaaaaaaaaaaaaaaaaaa/post/aaaaaaaaaaaaaaaaaaaaa"}"##;
+        let _: NoteForDe = serde_json::from_str(a).unwrap();
+    }
+
+    #[test]
+    fn note_de_3() {
+        let a = r###"{"@context":["https://join-lemmy.org/context.json","https://www.w3.org/ns/activitystreams"],"type":"Page","id":"https://lemmy.zip/post/aaaaaaaaa","attributedTo":"https://lemmy.zip/u/aaaaaaaaa","to":["https://lemmy.world/c/aaaaaaaaa","https://www.w3.org/ns/activitystreams#Public"],"name":"aaaaaaaaa","cc":[],"content":"<h2>aaaaaaaaa &amp; aaaaaaaaa</h2>\n<p>aaaaaaaaa, <em>aaaaaaaaa</em>, aaaaaaaaa <strong>aaaaaaaaa &amp; aaaaaaaaa</strong>, aaaaaaaaa <a href=\"https://x.com/aaaaaaaaa/status/aaaaaaaaa\" rel=\"nofollow\">aaaaaaaaa</a>.</p>\n<p><strong>aaaaaaaaa</strong>:</p>\n<ul>\n<li>aaaaaaaaa</li>\n<li>aaaaaaaaa.</li>\n</ul>\n<p><strong>aaaaaaaaa</strong>:\naaaaaaaaa</p>\n<hr />\n<p>aaaaaaaaa</p>\n","mediaType":"text/html","source":{"content":"## aaaaaaaaa ##\n\naaaaaaaaa","mediaType":"text/markdown"},"attachment":[{"href":"https://aaaaaaaaa.com/aaaaaaaaa","mediaType":"text/html; charset=utf-8","type":"Link"}],"image":{"type":"Image","url":"https://lemmy.zip/pictrs/image/aaaaaaaaa.webp"},"sensitive":false,"published":"2024-08-02T08:26:41.080977Z","language":{"identifier":"en","name":"English"},"audience":"https://lemmy.world/c/retrogaming","tag":[{"href":"https://lemmy.zip/post/aaaaaaaaa","name":"#aaaaaaaaa","type":"Hashtag"}]}"###;
+        let _: NoteForDe = serde_json::from_str(a).unwrap();
+    }
+
+    #[test]
     fn list_or_single_de_1() {
         let s = r##"{"url":"a"}"##;
         let a: ListOrSingle<UrlStruct> = serde_json::from_str(s).unwrap();
@@ -1306,12 +1330,9 @@ mod tests {
         let a: ListOrSingle<UrlStruct> = serde_json::from_str(s).unwrap();
         assert_eq!(
             a,
-            ListOrSingle::Vec(vec![
-                OptionForDe::None(IgnoredAny),
-                OptionForDe::Some(UrlStruct {
-                    url: "a".to_string(),
-                })
-            ])
+            ListOrSingle::Vec(vec![UrlStruct {
+                url: "a".to_string(),
+            }])
         );
     }
 

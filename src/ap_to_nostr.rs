@@ -629,7 +629,6 @@ async fn get_event_from_note<'a>(
                     TagStandard::Hashtag(name.strip_prefix('#').unwrap_or(name).to_string()).into(),
                 );
             }
-            _ => (),
         }
     }
     let content_tmp: String;
