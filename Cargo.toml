@@ -5,10 +5,10 @@ edition = "2021"
 
 [workspace]
 default-members = ["."]
-members = [".", "crates/*"]
+members = [".", "crates/html_to_md", "crates/json_sign", "crates/parser"]
 
 [dependencies]
-relay_pool = { path = "crates/relay_pool" }
+relay_pool = { path = "crates/relay_pool", features = ["nostr"] }
 html_to_md = { path = "crates/html_to_md" }
 parser = { path = "crates/parser" }
 json_sign = { path = "crates/json_sign" }
@@ -52,3 +52,4 @@ parking_lot = { version = "0.12.2", features = ["deadlock_detection"] }
 backtrace = {version = "0.3.72", optional = true}
 shellexpand = "3.1.0"
 serde_with = "3.9.0"
+secp256k1 = { version = "0.29.0", features = ["serde", "hashes", "global-context", "rand-std"] }

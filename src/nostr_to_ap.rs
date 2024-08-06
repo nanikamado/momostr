@@ -5,12 +5,12 @@ use crate::activity::{
 };
 use crate::bot::{handle_dm_message_to_bot, handle_message_to_bot};
 use crate::error::Error;
-use crate::nostr::{get_nostr_user_data, NostrUser};
+use crate::nostr::{get_nostr_user_data, NostrUser, PoolTypesInstance};
 use crate::server::{metadata_to_activity, AppState};
 use crate::util::get_media_type;
 use crate::{
-    RelayId, AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG,
-    OUTBOX_RELAYS_FOR_10002, REVERSE_DNS, USER_ID_PREFIX,
+    AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG, OUTBOX_RELAYS_FOR_10002,
+    REVERSE_DNS, USER_ID_PREFIX,
 };
 use futures_util::StreamExt;
 use html_escape::{encode_double_quoted_attribute, encode_text};
@@ -95,7 +95,7 @@ async fn broadcast_to_actors<A: Serialize, S: AsRef<str> + Debug>(
 #[tracing::instrument(skip_all)]
 fn handle_event(
     state: &Arc<AppState>,
-    EventWithRelayId { event, relay_id }: EventWithRelayId<RelayId>,
+    EventWithRelayId { event, relay_id }: EventWithRelayId<PoolTypesInstance>,
 ) {
     let proxied = event.tags.iter().any(|t| {
         matches!(
@@ -501,7 +501,7 @@ fn handle_event(
 }
 
 pub async fn watch(
-    mut event_stream: EventStream<RelayId>,
+    mut event_stream: EventStream<PoolTypesInstance>,
     state: &Arc<AppState>,
 ) -> Result<(), Error> {
     while let Some(e) = event_stream.next().await {
@@ -1152,7 +1152,7 @@ mod tests {
     use crate::event_deletion_queue::EventDeletionQueue;
     use crate::server::AppState;
     use crate::util::RateLimiter;
-    use crate::{RelayId, BOT_SEC, NOTE_ID_PREFIX, USER_AGENT};
+    use crate::{RelayId, BOT_KEYPAIR, NOTE_ID_PREFIX, USER_AGENT};
     use cached::TimedSizedCache;
     use itertools::Itertools;
     use lru::LruCache;
@@ -1194,10 +1194,9 @@ mod tests {
                     .collect_vec();
                 let nostr = RelayPool::new(USER_AGENT.to_string()).await;
                 let mut relays = FxHashSet::default();
-                let auth_master_key = Some(nostr_lib::Keys::new(BOT_SEC.clone()));
                 for (i, l) in relay_url.iter().enumerate() {
                     nostr
-                        .add_relay(RelayId(i as u32), l.clone(), auth_master_key.clone())
+                        .add_relay(RelayId(i as u32), l.clone(), Some(BOT_KEYPAIR.clone()))
                         .await
                         .unwrap();
                     relays.insert(RelayId(i as u32));

@@ -16,12 +16,14 @@ use event_deletion_queue::EventDeletionQueue;
 use html_to_md::FmtHtmlToMd;
 use itertools::Itertools;
 use lru::LruCache;
+use nostr::PoolTypesInstance;
 use nostr_lib::types::Filter;
 use nostr_lib::{FromBech32, Kind, PublicKey, SecretKey, Timestamp, ToBech32};
 use parking_lot::Mutex;
 use regex::Regex;
 use relay_pool::RelayPool;
 use rustc_hash::{FxHashMap, FxHashSet};
+use secp256k1::SECP256K1;
 use server::{listen, AppState};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, LazyLock as Lazy};
@@ -76,6 +78,10 @@ static AP_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
 });
 const CONTACT_LIST_LEN_LIMIT: usize = 500;
 static BOT_SEC: Lazy<SecretKey> = Lazy::new(|| SecretKey::from_bech32(env!("BOT_NSEC")).unwrap());
+static BOT_KEYPAIR: Lazy<Arc<secp256k1::Keypair>> = Lazy::new(|| {
+    let sec = secp256k1::SecretKey::from_slice(&BOT_SEC.secret_bytes()).unwrap();
+    Arc::new(secp256k1::Keypair::from_secret_key(SECP256K1, &sec))
+});
 static BOT_PUB: Lazy<PublicKey> =
     Lazy::new(|| nostr_lib::key::Keys::new(BOT_SEC.clone()).public_key());
 static ADMIN_PUB: Lazy<Option<PublicKey>> =
@@ -88,7 +94,7 @@ static KEY_ID: Lazy<String> =
     Lazy::new(|| format!("{USER_ID_PREFIX}{}", BOT_PUB.to_bech32().unwrap()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct RelayId(u32);
+pub struct RelayId(u32);
 
 const MAIN_RELAY: RelayId = RelayId(0);
 
@@ -112,7 +118,7 @@ fn main() {
 }
 
 async fn relay_to_id(
-    nostr: &RelayPool<RelayId>,
+    nostr: &RelayPool<PoolTypesInstance>,
     url: &str,
     relay_to_id_map: &mut FxHashMap<url::Url, RelayId>,
 ) -> RelayId {
@@ -122,8 +128,11 @@ async fn relay_to_id(
     } else {
         let id = RelayId(relay_to_id_map.len() as u32);
         relay_to_id_map.insert(l.clone(), id);
-        let auth_master_key = Some(nostr_lib::Keys::new(BOT_SEC.clone()));
-        nostr.add_relay(id, l, auth_master_key).await.unwrap();
+
+        nostr
+            .add_relay(id, l, Some(BOT_KEYPAIR.clone()))
+            .await
+            .unwrap();
         id
     }
 }
@@ -146,7 +155,7 @@ async fn run() {
     }
     let inbox_relays: Arc<FxHashSet<RelayId>> = Arc::new(inbox_relays);
     let filter = get_filter();
-    let event_stream = nostr.subscribe(filter, inbox_relays.clone()).await;
+    let event_stream = nostr.subscribe(filter.into(), inbox_relays.clone()).await;
     let http_client = reqwest::Client::new();
     let state = Arc::new(AppState {
         nostr,

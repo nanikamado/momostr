@@ -6,8 +6,9 @@ edition = "2021"
 [dependencies]
 futures-util = "0.3.30"
 lru = "0.12.2"
-nostr = "0.33.0"
-tokio = { version = "1.37.0" }
+nostr = { version = "0.33.0", optional = true }
+nostr-types = { git = "https://github.com/mikedilger/nostr-types", rev = "18ea50d0ca2bf0f79571f05d5db2071f80d67d5c", optional = true }
+tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
 tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-tungstenite = { version = "0.23.1", features = ["default", "native-tls"] }
 tracing = "0.1.40"
@@ -17,3 +18,4 @@ serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 itertools = "0.13.0"
 rustc-hash = "2.0.0"
+lnostr = { git = "https://github.com/nanikamado/rockstr.git", rev = "a8ad655f5460bc0f173e4fb5ad551f03185be2b5" }

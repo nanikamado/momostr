@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use nostr_lib::event::{Event, TagStandard};
 use nostr_lib::types::Filter;
 use nostr_lib::{EventId, JsonUtil, Kind, Metadata, PublicKey};
-use relay_pool::EventWithRelayId;
+use relay_pool::{EventWithRelayId, PoolTypes};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::OnceCell;
@@ -117,7 +117,7 @@ pub async fn get_nostr_user_data_without_cache(
 
 impl AppState {
     #[tracing::instrument(skip_all)]
-    pub async fn get_note(&self, note_id: EventId) -> Option<EventWithRelayId<RelayId>> {
+    pub async fn get_note(&self, note_id: EventId) -> Option<EventWithRelayId<PoolTypesInstance>> {
         let c = {
             let mut m = self.note_cache.lock();
             m.get_or_insert(note_id, || Arc::new(OnceCell::new()))
@@ -137,20 +137,23 @@ impl AppState {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn subscribe_filter(&self, filters: Vec<Filter>) -> relay_pool::EventStream<RelayId> {
+    pub async fn subscribe_filter(
+        &self,
+        filters: Vec<Filter>,
+    ) -> relay_pool::EventStream<PoolTypesInstance> {
         debug!("filter = {}", serde_json::to_string(&filters).unwrap());
         let w = self.nostr_subscribe_rate.lock().wait();
         w.await;
         self.nostr
-            .subscribe(filters, self.inbox_relays.clone())
+            .subscribe(filters.into(), self.inbox_relays.clone())
             .await
     }
 
-    pub async fn nostr_send(&self, event: Arc<Event>, keys: Arc<nostr_lib::Keys>) {
+    pub async fn nostr_send(&self, event: Arc<Event>) {
         let s = self.nostr_send_rate.lock().wait();
         s.await;
         self.nostr
-            .send(event, Some(keys), self.outbox_relays.clone())
+            .send(event, None, self.outbox_relays.clone())
             .await
     }
 
@@ -159,10 +162,23 @@ impl AppState {
         &self,
         f: Filter,
         timeout: Duration,
-    ) -> Option<EventWithRelayId<RelayId>> {
+    ) -> Option<EventWithRelayId<PoolTypesInstance>> {
         tokio::time::timeout(timeout, self.subscribe_filter(vec![f]).await.next())
             .await
             .ok()
             .flatten()
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PoolTypesInstance;
+
+impl PoolTypes for PoolTypesInstance {
+    type RelayId = RelayId;
+
+    type Event = Arc<nostr_lib::Event>;
+
+    type Filter = Filter;
+
+    type EventId = nostr_lib::EventId;
 }

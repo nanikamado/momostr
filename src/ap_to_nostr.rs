@@ -4,10 +4,11 @@ use crate::activity::{
     NoteForDe, NoteTagForDe, StrOrId, AS_PUBLIC, HASHTAG_LINK_REGEX,
 };
 use crate::error::Error;
+use crate::nostr::PoolTypesInstance;
 use crate::util::get_media_type;
 use crate::{
-    html_to_text, RelayId, BOT_PUB, CONTACT_LIST_LEN_LIMIT, DOMAIN, MAIN_RELAY, NOTE_ID_PREFIX,
-    REVERSE_DNS, USER_ID_PREFIX,
+    html_to_text, BOT_PUB, CONTACT_LIST_LEN_LIMIT, DOMAIN, MAIN_RELAY, NOTE_ID_PREFIX, REVERSE_DNS,
+    USER_ID_PREFIX,
 };
 use axum::body::to_bytes;
 use axum::extract::{Request, State};
@@ -113,7 +114,7 @@ pub async fn http_post_inbox(
                     .custom_created_at(Timestamp::now())
                     .to_event(&keys)
                     .unwrap();
-                state.nostr_send(Arc::new(l), Arc::new(keys)).await;
+                state.nostr_send(Arc::new(l)).await;
             });
         }
         ActivityForDeInner::Undo { object } => match object.activity_inner {
@@ -142,7 +143,7 @@ pub async fn http_post_inbox(
                         .custom_created_at(Timestamp::now())
                         .to_event(&keys)
                         .unwrap();
-                    state.nostr_send(Arc::new(l), Arc::new(keys)).await;
+                    state.nostr_send(Arc::new(l)).await;
                 }
             }
             ActivityForDeInner::Like { id, .. } | ActivityForDeInner::Announce { id, .. } => {
@@ -153,18 +154,15 @@ pub async fn http_post_inbox(
                     tokio::spawn(async move {
                         let keys = nostr_lib::Keys::new(nsec.clone());
                         state
-                            .nostr_send(
-                                Arc::new(
-                                    EventBuilder::delete([e])
-                                        .add_tags([TagStandard::LabelNamespace(
-                                            REVERSE_DNS.to_string(),
-                                        )
-                                        .into()])
-                                        .to_event(&keys)
-                                        .unwrap(),
-                                ),
-                                Arc::new(keys),
-                            )
+                            .nostr_send(Arc::new(
+                                EventBuilder::delete([e])
+                                    .add_tags([TagStandard::LabelNamespace(
+                                        REVERSE_DNS.to_string(),
+                                    )
+                                    .into()])
+                                    .to_event(&keys)
+                                    .unwrap(),
+                            ))
                             .await;
                     });
                 } else {
@@ -261,7 +259,6 @@ pub async fn http_post_inbox(
                     .to_event(&keys)
                     .unwrap(),
                 ),
-                Arc::new(keys),
                 ap_id,
             )
             .await;
@@ -313,7 +310,7 @@ pub async fn http_post_inbox(
                 .custom_created_at(Timestamp::from(published.timestamp() as u64))
                 .to_event(&keys)
                 .unwrap();
-                send_event(&state, Arc::new(event), Arc::new(keys), ap_id.into_owned()).await;
+                send_event(&state, Arc::new(event), ap_id.into_owned()).await;
             }
         }
         ActivityForDeInner::Delete {
@@ -326,18 +323,14 @@ pub async fn http_post_inbox(
                 tokio::spawn(async move {
                     let keys = nostr_lib::Keys::new(nsec.clone());
                     state
-                        .nostr_send(
-                            Arc::new(
-                                EventBuilder::delete([e])
-                                    .add_tags([TagStandard::LabelNamespace(
-                                        REVERSE_DNS.to_string(),
-                                    )
-                                    .into()])
-                                    .to_event(&keys)
-                                    .unwrap(),
-                            ),
-                            Arc::new(keys),
-                        )
+                        .nostr_send(Arc::new(
+                            EventBuilder::delete([e])
+                                .add_tags([
+                                    TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()
+                                ])
+                                .to_event(&keys)
+                                .unwrap(),
+                        ))
                         .await;
                     state.event_deletion_queue.delete(e, nsec)
                 });
@@ -396,14 +389,9 @@ impl<'a> InternalApId<'a> {
     }
 }
 
-async fn send_event(
-    state: &AppState,
-    event: Arc<Event>,
-    keys: Arc<nostr_lib::Keys>,
-    ap_id: InternalApId<'static>,
-) {
+async fn send_event(state: &AppState, event: Arc<Event>, ap_id: InternalApId<'static>) {
     state.db.insert_ap_id_to_event_id(ap_id, event.id);
-    state.nostr_send(event, keys).await;
+    state.nostr_send(event).await;
 }
 
 async fn get_note_from_this_server(state: &AppState, url: &str) -> Option<Arc<Event>> {
@@ -439,7 +427,7 @@ async fn get_event_from_object_id<'a>(
     state: &'a AppState,
     url: String,
     mut event_visited: Cow<'a, [String]>,
-) -> Result<EventWithRelayId<RelayId>, NostrConversionError> {
+) -> Result<EventWithRelayId<PoolTypesInstance>, NostrConversionError> {
     if let Some(event_id) = url.strip_prefix(NOTE_ID_PREFIX) {
         let event_id = nostr_lib::EventId::from_bech32(event_id)
             .map_err(|_| NostrConversionError::InvalidEventId)?;
@@ -758,7 +746,7 @@ async fn get_event_from_note<'a>(
     let ap_id = InternalApId::get(note.id.into(), &actor.id)
         .map_err(|_| NostrConversionError::InvalidActorId)?
         .into_owned();
-    send_event(state, event.clone(), Arc::new(keys), ap_id).await;
+    send_event(state, event.clone(), ap_id).await;
     Ok(event)
 }
 

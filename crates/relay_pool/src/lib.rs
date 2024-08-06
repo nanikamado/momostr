@@ -1,14 +1,17 @@
-use futures_util::stream::FuturesUnordered;
+#[cfg(feature = "nostr")]
+pub mod nostr_sdk_impl;
+#[cfg(feature = "nostr-types")]
+pub mod nostr_types_impl;
+
 use futures_util::{SinkExt, Stream};
 use id_pool::IdPool;
 use itertools::Itertools;
+use lnostr::RelayMessage;
 use lru::LruCache;
-use nostr::types::Filter;
-use nostr::{Event, JsonUtil, RelayMessage};
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
@@ -27,67 +30,89 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error, info, trace, warn};
 
-enum FilterOp<RelayId> {
-    Subscribe(
-        u32,
-        Arc<Vec<Filter>>,
-        Sender<EventWithRelayId<RelayId>>,
-        Arc<FxHashSet<RelayId>>,
-    ),
-    Unsubscribe(u32),
-    ChangeFilter(u32, Vec<Filter>, Arc<FxHashSet<RelayId>>),
+pub trait PoolTypes {
+    type RelayId: Copy + Send + Sync + Eq + Hash + Debug + 'static;
+    type Event: Send + Sync + Clone + NostrEvent + 'static;
+    type Filter: NostrFilter<Self::Event>;
+    type EventId: for<'a> Deserialize<'a> + Serialize + Clone + Debug + Eq + Send + Sync;
+}
+
+pub trait NostrEvent: Serialize + for<'a> Deserialize<'a> + Debug {
+    fn verify(&self) -> bool;
+    fn id_as_bytes(&self) -> &[u8; 32];
+}
+
+impl<T: NostrEvent> NostrEvent for Arc<T> {
+    fn verify(&self) -> bool {
+        self.as_ref().verify()
+    }
+
+    fn id_as_bytes(&self) -> &[u8; 32] {
+        self.as_ref().id_as_bytes()
+    }
+}
+
+pub trait NostrFilter<Event>: Serialize + Debug + Send + Sync + Clone {
+    fn match_event(&self, event: &Event) -> bool;
 }
 
 #[derive(Debug, Clone)]
-struct SendEvent<RelayId> {
-    event: Arc<nostr::Event>,
-    keys: Option<Arc<nostr::Keys>>,
-    relays: Arc<FxHashSet<RelayId>>,
+struct SendEvent<T: PoolTypes> {
+    event: T::Event,
+    keys: Option<Arc<lnostr::Keypair>>,
+    relays: Arc<FxHashSet<T::RelayId>>,
 }
 
 #[derive(Debug)]
-pub struct RelayPool<RelayId> {
-    tx_for_filter_ops: Sender<FilterOp<RelayId>>,
-    tx_for_send_event: Sender<SendEvent<RelayId>>,
-    tx_for_add_relay: Sender<(RelayId, url::Url, Option<nostr::Keys>)>,
+pub struct RelayPool<T: PoolTypes> {
+    queue_sender: Sender<RelayPoolOp<T>>,
     counter: AtomicU32,
 }
 
-struct SenderWithId<RelayId> {
-    sender: Sender<RelayMessageWithId<RelayId>>,
-    id: RelayId,
+struct SenderWithId<T: PoolTypes> {
+    sender: Sender<RelayPoolOp<T>>,
+    id: T::RelayId,
 }
 
-struct RelayMessageWithId<RelayId> {
-    relay_message: RelayMessage,
-    id: RelayId,
+struct RelayMessageWithId<T: PoolTypes> {
+    relay_message: (String, T::Event),
+    id: T::RelayId,
 }
 
-impl<RelayId: Copy> SenderWithId<RelayId> {
-    async fn send(&self, message: RelayMessage) {
+impl<T: PoolTypes> SenderWithId<T> {
+    async fn send(&self, message: (String, T::Event)) {
         self.sender
-            .send(RelayMessageWithId {
+            .send(RelayPoolOp::Receive(RelayMessageWithId {
                 relay_message: message,
                 id: self.id,
-            })
+            }))
             .await
             .unwrap()
     }
 }
 
-#[derive(Debug, Clone)]
-struct RelayOp<RelayId> {
-    msg: ClientMessage,
-    relays: Arc<FxHashSet<RelayId>>,
+#[derive(Debug)]
+struct RelayOp<T: PoolTypes> {
+    msg: ClientMessage<T>,
+    relays: Arc<FxHashSet<T::RelayId>>,
 }
 
-struct ReceiverWithId<RelayId> {
-    receiver: broadcast::Receiver<RelayOp<RelayId>>,
-    id: RelayId,
+impl<T: PoolTypes> Clone for RelayOp<T> {
+    fn clone(&self) -> Self {
+        Self {
+            msg: self.msg.clone(),
+            relays: self.relays.clone(),
+        }
+    }
 }
 
-impl<Id: Clone + Eq + Hash> ReceiverWithId<Id> {
-    async fn recv(&mut self) -> Result<ClientMessage, broadcast::error::RecvError> {
+struct ReceiverWithId<T: PoolTypes> {
+    receiver: broadcast::Receiver<RelayOp<T>>,
+    id: T::RelayId,
+}
+
+impl<T: PoolTypes> ReceiverWithId<T> {
+    async fn recv(&mut self) -> Result<ClientMessage<T>, broadcast::error::RecvError> {
         loop {
             match self.receiver.recv().await {
                 Ok(op) => {
@@ -100,117 +125,64 @@ impl<Id: Clone + Eq + Hash> ReceiverWithId<Id> {
         }
     }
 }
+enum RelayPoolOp<T: PoolTypes> {
+    AddRelay(T::RelayId, url::Url, Option<Arc<lnostr::Keypair>>),
+    Subscribe(
+        u32,
+        Arc<Vec<T::Filter>>,
+        Sender<EventWithRelayId<T>>,
+        Arc<FxHashSet<T::RelayId>>,
+    ),
+    Unsubscribe(u32),
+    ChangeFilter(u32, Vec<T::Filter>, Arc<FxHashSet<T::RelayId>>),
+    Send(SendEvent<T>),
+    Receive(RelayMessageWithId<T>),
+}
 
-impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
+impl<T: PoolTypes + 'static> RelayPool<T> {
     pub async fn new(user_agent: String) -> Self {
         let user_agent = Arc::new(user_agent);
-        let broadcast_sender = tokio::sync::broadcast::Sender::new(1_000);
-        let (tx_for_events, mut rx_for_events) = tokio::sync::mpsc::channel(10);
-        let (tx_for_filter_ops, mut rx_for_filter_ops) = tokio::sync::mpsc::channel(10);
-        let (tx_for_send_event, mut rx_for_send_event) = tokio::sync::mpsc::channel(10);
-        let (tx_for_add_relay, mut rx_for_add_relay) = tokio::sync::mpsc::channel(10);
-        let mut relay_pool = FuturesUnordered::new();
-        let broadcast_sender_cloned = broadcast_sender.clone();
-        let subscription_loop = async move {
-            loop {
-                if relay_pool.is_empty() {
-                    if let Some((id, url, auth_master_key)) = rx_for_add_relay.recv().await {
-                        relay_pool.push(subscribe_relay(
-                            url,
-                            ReceiverWithId {
-                                receiver: broadcast_sender_cloned.subscribe(),
-                                id,
-                            },
-                            SenderWithId {
-                                sender: tx_for_events.clone(),
-                                id,
-                            },
-                            user_agent.clone(),
-                            auth_master_key,
-                        ));
-                    } else {
-                        break;
-                    }
-                }
-                tokio::select! {
-                    e = relay_pool.next() => {
-                        tracing::error!("{:?}", e.unwrap());
-                    }
-                    Some((id, url, auth_master_key)) = rx_for_add_relay.recv() => {
-                        relay_pool.push(subscribe_relay(
-                            url,
-                            ReceiverWithId {
-                                receiver: broadcast_sender_cloned.subscribe(),
-                                id,
-                            },
-                            SenderWithId {
-                                sender: tx_for_events.clone(),
-                                id,
-                            },
-                            user_agent.clone(),
-                            auth_master_key,
-                        ));
-                    }
-                    else => break,
-                }
-            }
-        };
-        let collect_events = async move {
-            let mut subs = SubscriptionState::new(broadcast_sender);
-            loop {
-                tokio::select! {
-                    Some(op) = rx_for_filter_ops.recv() => {
-                         subs.handle_filter_op(op).await;
-                    }
-                    Some(op) = rx_for_send_event.recv() => {
-                         subs.handle_send_event(op).await;
-                    }
-                    Some(e) = rx_for_events.recv() => subs.handle_event(e),
-                    else => break,
-                }
-            }
-        };
-        tokio::spawn(async {
-            tokio::select! {
-                _ = subscription_loop => (),
-                _ = collect_events => (),
+        let broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<T>> =
+            tokio::sync::broadcast::Sender::new(1_000);
+        let (queue_sender, mut queue_receiver) = tokio::sync::mpsc::channel(100);
+        let mut subs = SubscriptionState::new(broadcast_sender, queue_sender.clone(), user_agent);
+        tokio::spawn(async move {
+            while let Some(op) = queue_receiver.recv().await {
+                subs.handle_op(op).await;
             }
         });
         Self {
-            tx_for_filter_ops,
-            tx_for_send_event,
-            tx_for_add_relay,
+            queue_sender,
             counter: AtomicU32::new(0),
         }
     }
 
     pub async fn add_relay(
         &self,
-        relay_id: RelayId,
+        relay_id: T::RelayId,
         url: url::Url,
-        auth_master_key: Option<nostr::Keys>,
-    ) -> Result<(), tokio::sync::mpsc::error::SendError<(RelayId, url::Url, Option<nostr::Keys>)>>
-    {
-        self.tx_for_add_relay
-            .send((relay_id, url, auth_master_key))
+        auth_master_key: Option<Arc<lnostr::Keypair>>,
+    ) -> Result<(), ()> {
+        self.queue_sender
+            .send(RelayPoolOp::AddRelay(relay_id, url, auth_master_key))
             .await
+            .map_err(|_| ())
     }
 
     pub async fn subscribe(
         &self,
-        filters: Vec<Filter>,
-        relays: Arc<FxHashSet<RelayId>>,
-    ) -> EventStream<RelayId> {
+        filters: Arc<Vec<T::Filter>>,
+        relays: Arc<FxHashSet<T::RelayId>>,
+    ) -> EventStream<T> {
         let (tx, rx) = tokio::sync::mpsc::channel(1_000);
         let id = self.counter.fetch_add(1, atomic::Ordering::Relaxed);
-        let filters = Arc::new(filters);
-        self.tx_for_filter_ops
-            .send(FilterOp::Subscribe(id, filters, tx, relays))
+        self.queue_sender
+            .send(RelayPoolOp::Subscribe(id, filters, tx, relays))
             .await
             .unwrap();
         EventStream {
             stream: rx,
-            tx_for_ops: self.tx_for_filter_ops.clone(),
+            tx_for_ops: self.queue_sender.clone(),
             id,
             cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
         }
@@ -219,22 +191,22 @@ impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
     pub async fn change_filter(
         &self,
         id: u32,
-        filters: Vec<Filter>,
-        relays: Arc<FxHashSet<RelayId>>,
+        filters: Vec<T::Filter>,
+        relays: Arc<FxHashSet<T::RelayId>>,
     ) {
-        self.tx_for_filter_ops
-            .send(FilterOp::ChangeFilter(id, filters, relays))
+        self.queue_sender
+            .send(RelayPoolOp::ChangeFilter(id, filters, relays))
             .await
             .unwrap();
     }
 
     pub async fn get_event_with_timeout(
         &self,
-        f: Filter,
+        f: T::Filter,
         timeout: Duration,
-        relays: Arc<FxHashSet<RelayId>>,
-    ) -> Option<EventWithRelayId<RelayId>> {
-        tokio::time::timeout(timeout, self.subscribe(vec![f], relays).await.next())
+        relays: Arc<FxHashSet<T::RelayId>>,
+    ) -> Option<EventWithRelayId<T>> {
+        tokio::time::timeout(timeout, self.subscribe(vec![f].into(), relays).await.next())
             .await
             .ok()
             .flatten()
@@ -242,16 +214,16 @@ impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
 
     pub async fn send(
         &self,
-        event: Arc<nostr::Event>,
-        keys: Option<Arc<nostr::Keys>>,
-        relays: Arc<FxHashSet<RelayId>>,
+        event: T::Event,
+        keys: Option<Arc<lnostr::Keypair>>,
+        relays: Arc<FxHashSet<T::RelayId>>,
     ) {
-        self.tx_for_send_event
-            .send(SendEvent {
+        self.queue_sender
+            .send(RelayPoolOp::Send(SendEvent {
                 event,
                 keys,
                 relays,
-            })
+            }))
             .await
             .unwrap();
     }
@@ -261,21 +233,26 @@ impl<RelayId: Copy + Send + Sync + Eq + Hash + 'static> RelayPool<RelayId> {
 struct FilterId(u32);
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub struct EventWithRelayId<RelayId> {
-    pub event: Arc<nostr::Event>,
-    pub relay_id: RelayId,
+pub struct EventWithRelayId<T: PoolTypes> {
+    pub event: T::Event,
+    pub relay_id: T::RelayId,
 }
 
-struct FilterAndSenders<RelayId> {
-    filter: Arc<Vec<Filter>>,
-    sender: Sender<EventWithRelayId<RelayId>>,
+struct FilterAndSenders<T: PoolTypes> {
+    filter: Arc<Vec<T::Filter>>,
+    sender: Sender<EventWithRelayId<T>>,
 }
 
-struct SubscriptionState<RelayId> {
-    sub_id_to_filter_id: HashMap<u32, (FilterId, Arc<FxHashSet<RelayId>>)>,
-    filter_id_to_senders: FxHashMap<FilterId, FilterAndSenders<RelayId>>,
+#[derive(Debug, PartialEq, Eq)]
+struct Req<T: PoolTypes>(FilterId, Arc<FxHashSet<T::RelayId>>);
+
+struct SubscriptionState<T: PoolTypes> {
+    sub_id_to_filter_id: HashMap<u32, Req<T>>,
+    filter_id_to_senders: FxHashMap<FilterId, FilterAndSenders<T>>,
     id_pool: IdPool,
-    broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<RelayId>>,
+    broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<T>>,
+    op_sender: Sender<RelayPoolOp<T>>,
+    user_agent: Arc<String>,
 }
 
 impl Display for FilterId {
@@ -301,88 +278,78 @@ impl Serialize for FilterId {
     }
 }
 
-impl<RelayId: Copy> SubscriptionState<RelayId> {
-    fn new(broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<RelayId>>) -> Self {
+impl<T: PoolTypes + 'static> SubscriptionState<T> {
+    fn new(
+        broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<T>>,
+        op_sender: Sender<RelayPoolOp<T>>,
+        user_agent: Arc<String>,
+    ) -> Self {
         Self {
             sub_id_to_filter_id: Default::default(),
             filter_id_to_senders: Default::default(),
             id_pool: IdPool::new_ranged(0..u32::MAX),
             broadcast_sender,
+            op_sender,
+            user_agent,
         }
     }
 
-    fn handle_event(&mut self, e: RelayMessageWithId<RelayId>) {
-        if let RelayMessageWithId {
-            relay_message:
-                RelayMessage::Event {
-                    subscription_id,
-                    event,
-                },
+    fn handle_event(&mut self, e: RelayMessageWithId<T>) {
+        let RelayMessageWithId {
+            relay_message: (subscription_id, event),
             id: relay_id,
-        } = e
-        {
-            if event.verify().is_err() {
-                return;
-            }
-            let event = Arc::new(*event);
-            if let Ok(id) = subscription_id.to_string().parse() {
-                if let Some(f) = self.filter_id_to_senders.get(&id) {
-                    if f.filter.iter().any(|f| f.match_event(&event)) {
-                        let _ = f.sender.try_send(EventWithRelayId {
-                            event: event.clone(),
-                            relay_id,
-                        });
-                    } else {
-                        error!(
-                            "received event {} did not match the filter {}.",
-                            serde_json::to_string(&event).unwrap(),
-                            serde_json::to_string(&f.filter).unwrap()
-                        );
-                    }
+        } = e;
+
+        if !event.verify() {
+            return;
+        }
+        if let Ok(id) = subscription_id.to_string().parse() {
+            if let Some(f) = self.filter_id_to_senders.get(&id) {
+                if f.filter.iter().any(|f| f.match_event(&event)) {
+                    let _ = f.sender.try_send(EventWithRelayId {
+                        event: event.clone(),
+                        relay_id,
+                    });
                 } else {
-                    debug!("subscription id {id} not found");
+                    error!(
+                        "received event {} did not match the filter {}.",
+                        serde_json::to_string(&event).unwrap(),
+                        serde_json::to_string(&f.filter).unwrap()
+                    );
                 }
+            } else {
+                debug!("subscription id {id} not found");
             }
         }
     }
 
     // common code among subscribe and filter change
+    #[tracing::instrument(skip_all)]
     fn sub(
         &mut self,
         id: u32,
-        filters: Arc<Vec<Filter>>,
-        tx: Sender<EventWithRelayId<RelayId>>,
-        relays: Arc<FxHashSet<RelayId>>,
+        filters: Arc<Vec<T::Filter>>,
+        tx: Sender<EventWithRelayId<T>>,
+        relays: Arc<FxHashSet<T::RelayId>>,
     ) {
         let filter_id = FilterId(self.id_pool.request_id().unwrap());
-        let fs: Vec<_> = filters
-            .iter()
-            .filter(|f| {
-                !f.ids.as_ref().map(|l| l.is_empty()).unwrap_or(false)
-                    && !f.authors.as_ref().map(|l| l.is_empty()).unwrap_or(false)
-                    && !f.kinds.as_ref().map(|l| l.is_empty()).unwrap_or(false)
-                    && f.generic_tags.iter().all(|(_, l)| !l.is_empty())
-            })
-            .cloned()
-            .collect();
-        if !fs.is_empty() {
-            debug!(
-                "starting connection with id {filter_id}, filters = [{}]",
-                fs.iter()
-                    .format_with(", ", |a, f| f(&serde_json::to_string(a).unwrap()))
-            );
-            broadcast(
-                &self.broadcast_sender,
-                RelayOp {
-                    msg: ClientMessage::Req {
-                        subscription_id: filter_id,
-                        filters: fs,
-                    },
-                    relays: relays.clone(),
+        debug!(
+            "starting connection with id {filter_id}, filters = [{}]",
+            filters
+                .iter()
+                .format_with(", ", |a, f| f(&serde_json::to_string(a).unwrap()))
+        );
+        broadcast(
+            &self.broadcast_sender,
+            RelayOp {
+                msg: ClientMessage::Req {
+                    subscription_id: filter_id,
+                    filters: filters.clone(),
                 },
-            )
-        }
-        self.sub_id_to_filter_id.insert(id, (filter_id, relays));
+                relays: relays.clone(),
+            },
+        );
+        self.sub_id_to_filter_id.insert(id, Req(filter_id, relays));
         self.filter_id_to_senders.insert(
             filter_id,
             FilterAndSenders {
@@ -393,8 +360,9 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
     }
 
     // common code among unsubscribe and filter change
-    fn unsub(&mut self, id: u32) -> Sender<EventWithRelayId<RelayId>> {
-        let (filter_id, relays) = self.sub_id_to_filter_id.remove(&id).unwrap();
+    #[tracing::instrument(skip_all)]
+    fn unsub(&mut self, id: u32) -> Sender<EventWithRelayId<T>> {
+        let Req(filter_id, relays) = self.sub_id_to_filter_id.remove(&id).unwrap();
         let f = self.filter_id_to_senders.remove(&filter_id).unwrap();
         self.id_pool.return_id(filter_id.0).unwrap();
         broadcast(
@@ -411,41 +379,59 @@ impl<RelayId: Copy> SubscriptionState<RelayId> {
         f.sender
     }
 
-    async fn handle_filter_op(&mut self, op: FilterOp<RelayId>) {
+    async fn handle_op(&mut self, op: RelayPoolOp<T>) {
         match op {
-            FilterOp::Subscribe(id, filters, tx, relays) => {
+            RelayPoolOp::AddRelay(id, url, auth_master_key) => {
+                let receiver = self.broadcast_sender.subscribe();
+                let sender = self.op_sender.clone();
+                let user_agent = self.user_agent.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = subscribe_relay(
+                        url,
+                        ReceiverWithId { receiver, id },
+                        SenderWithId { sender, id },
+                        user_agent,
+                        auth_master_key,
+                    )
+                    .await
+                    {
+                        error!("{e}");
+                    }
+                });
+            }
+            RelayPoolOp::Subscribe(id, filters, tx, relays) => {
                 self.sub(id, filters, tx, relays);
             }
-            FilterOp::Unsubscribe(id) => {
+            RelayPoolOp::Unsubscribe(id) => {
                 self.unsub(id);
             }
-            FilterOp::ChangeFilter(id, filters, relays) => {
+            RelayPoolOp::ChangeFilter(id, filters, relays) => {
                 let tx = self.unsub(id);
                 self.sub(id, Arc::new(filters), tx, relays);
             }
+            RelayPoolOp::Send(op) => {
+                broadcast(
+                    &self.broadcast_sender,
+                    RelayOp {
+                        msg: ClientMessage::Event(op.event, op.keys),
+                        relays: op.relays,
+                    },
+                );
+            }
+            RelayPoolOp::Receive(e) => self.handle_event(e),
         }
     }
-
-    async fn handle_send_event(&mut self, op: SendEvent<RelayId>) {
-        broadcast(
-            &self.broadcast_sender,
-            RelayOp {
-                msg: ClientMessage::Event(op.event, op.keys),
-                relays: op.relays,
-            },
-        );
-    }
 }
 
-pub struct EventStream<RelayId> {
-    stream: tokio::sync::mpsc::Receiver<EventWithRelayId<RelayId>>,
-    tx_for_ops: Sender<FilterOp<RelayId>>,
+pub struct EventStream<T: PoolTypes> {
+    stream: tokio::sync::mpsc::Receiver<EventWithRelayId<T>>,
+    tx_for_ops: Sender<RelayPoolOp<T>>,
     id: u32,
-    cache: LruCache<Arc<Event>, ()>,
+    cache: LruCache<[u8; 32], ()>,
 }
 
-impl<RelayId> Stream for EventStream<RelayId> {
-    type Item = EventWithRelayId<RelayId>;
+impl<T: PoolTypes> Stream for EventStream<T> {
+    type Item = EventWithRelayId<T>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -455,7 +441,7 @@ impl<RelayId> Stream for EventStream<RelayId> {
         loop {
             match self.stream.poll_recv(cx) {
                 Ready(Some(a)) => {
-                    if check_event(&mut self, &a.event) {
+                    if check_event(&mut self, a.event.id_as_bytes()) {
                         break Ready(Some(a));
                     }
                 }
@@ -466,42 +452,42 @@ impl<RelayId> Stream for EventStream<RelayId> {
     }
 }
 
-fn check_event<RelayId>(
-    event_stream: &mut EventStream<RelayId>,
-    event: &Arc<nostr::Event>,
-) -> bool {
-    if event_stream.cache.contains(event) {
+fn check_event<T: PoolTypes>(event_stream: &mut EventStream<T>, event_id: &[u8; 32]) -> bool {
+    if event_stream.cache.contains(event_id) {
         false
     } else {
-        event_stream.cache.put(event.clone(), ());
+        event_stream.cache.put(*event_id, ());
         true
     }
 }
 
-impl<RelayId> Drop for EventStream<RelayId> {
+impl<T: PoolTypes> Drop for EventStream<T> {
     fn drop(&mut self) {
         self.tx_for_ops
-            .try_send(FilterOp::Unsubscribe(self.id))
+            .try_send(RelayPoolOp::Unsubscribe(self.id))
             .unwrap();
     }
 }
 
-impl<RelayId> EventStream<RelayId> {
+impl<T: PoolTypes> EventStream<T> {
     pub fn id(&self) -> u32 {
         self.id
     }
 }
 
-fn broadcast<RelayId>(tx: &broadcast::Sender<RelayOp<RelayId>>, message: RelayOp<RelayId>) {
+fn broadcast<T: PoolTypes>(tx: &broadcast::Sender<RelayOp<T>>, message: RelayOp<T>) {
     if let Err(e) = tx.send(message) {
-        error!("failed to connect to relays: {e}")
+        error!(
+            "failed to connect to relays: {e}, count = {}",
+            tx.receiver_count()
+        )
     }
 }
 
 #[tracing::instrument(skip_all)]
-async fn first_request(
-    message: &Option<ClientMessage>,
-    cs: &mut ConnectionState,
+async fn first_request<T: PoolTypes>(
+    message: &Option<ClientMessage<T>>,
+    cs: &mut ConnectionState<T>,
     last_connection_time: &mut SystemTime,
     connection_delay: &mut Duration,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::Error> {
@@ -530,7 +516,7 @@ async fn first_request(
     };
     debug!("connected to {}: r = {r:?}, sub = {:?}", cs.url, cs.subs);
     for (id, filters) in cs.subs.iter() {
-        let m = req_as_json(*id, filters);
+        let m = req_as_json::<T>(*id, filters);
         debug!("{} <== {m}", cs.url);
         ws.send(Message::Text(m)).await?;
     }
@@ -542,22 +528,22 @@ async fn first_request(
 
 const TIMEOUT_DURATION: Duration = Duration::from_secs(60 * 3);
 
-struct UnhandledMessage(Arc<Event>, Option<Arc<nostr::Keys>>);
+struct UnhandledMessage<T: PoolTypes>(T::Event, Option<Arc<lnostr::Keypair>>);
 
-struct ConnectionState {
+struct ConnectionState<T: PoolTypes> {
     url: url::Url,
     user_agent: Arc<String>,
-    auth_master_key: Option<nostr::Keys>,
-    subs: HashMap<FilterId, Vec<Filter>>,
+    auth_master_key: Option<Arc<lnostr::Keypair>>,
+    subs: HashMap<FilterId, Arc<Vec<T::Filter>>>,
     auth: Option<String>,
 }
 
-async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
+async fn subscribe_relay<T: PoolTypes>(
     url: url::Url,
-    mut rx_for_ops: ReceiverWithId<RelayId>,
-    tx_for_events: SenderWithId<RelayId>,
+    mut rx_for_ops: ReceiverWithId<T>,
+    tx_for_events: SenderWithId<T>,
     user_agent: Arc<String>,
-    auth_master_key: Option<nostr::Keys>,
+    auth_master_key: Option<Arc<lnostr::Keypair>>,
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let mut last_connection_time = SystemTime::UNIX_EPOCH;
     let mut connection_delay = Duration::from_secs(5);
@@ -649,11 +635,11 @@ async fn subscribe_relay<RelayId: Clone + Copy + Eq + Hash>(
 }
 
 #[tracing::instrument(skip_all)]
-async fn handle_ops(
-    message: ClientMessage,
-    cs: &mut ConnectionState,
+async fn handle_ops<T: PoolTypes>(
+    message: ClientMessage<T>,
+    cs: &mut ConnectionState<T>,
     ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-) -> Result<(), Option<UnhandledMessage>> {
+) -> Result<(), Option<UnhandledMessage<T>>> {
     if let Err(e) = send_event(&message, cs, ws).await {
         use tokio_tungstenite::tungstenite::Error::*;
         match e {
@@ -679,9 +665,9 @@ async fn handle_ops(
     }
 }
 
-async fn send_event(
-    message: &ClientMessage,
-    cs: &mut ConnectionState,
+async fn send_event<T: PoolTypes>(
+    message: &ClientMessage<T>,
+    cs: &mut ConnectionState<T>,
     // url: &url::Url,
     ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     // subs: &mut HashMap<FilterId, Vec<Filter>>,
@@ -693,7 +679,7 @@ async fn send_event(
             filters,
         } => {
             cs.subs.insert(*id, filters.clone());
-            req_as_json(*id, filters)
+            req_as_json::<T>(*id, filters)
         }
         ClientMessage::Close(id) => {
             cs.subs.remove(id);
@@ -701,54 +687,56 @@ async fn send_event(
         }
         ClientMessage::Event(e, keys) => {
             if let (Some(auth), Some(keys)) = (&cs.auth, keys) {
-                let e = nostr::EventBuilder::auth(auth, cs.url.clone())
-                    .to_event(keys)
-                    .unwrap();
-                let m = format!(r#"["AUTH",{}]"#, e.as_json());
+                let e = lnostr::EventBuilder::auth(auth, cs.url.as_str()).to_event(keys);
+                let m = format!(r#"["AUTH",{}]"#, serde_json::to_string(&e).unwrap());
                 debug!("{} <== {m}", cs.url);
                 ws.send(Message::Text(m)).await?;
             }
-            format!(r#"["EVENT",{}]"#, e.as_json())
+            format!(r#"["EVENT",{}]"#, serde_json::to_string(e).unwrap())
         }
     };
     debug!("{} <== {m}", cs.url);
     ws.send(Message::Text(m)).await
 }
 
-fn req_as_json(id: FilterId, filters: &[Filter]) -> String {
+fn req_as_json<T: PoolTypes>(id: FilterId, filters: &[T::Filter]) -> String {
     format!(
         r#"["REQ",{id},{}]"#,
-        filters.iter().format_with(",", |a, f| f(&a.as_json()))
+        filters
+            .iter()
+            .format_with(",", |a, f| f(&serde_json::to_string(a).unwrap()))
     )
 }
 
 #[tracing::instrument(skip_all)]
-async fn handle_message<RelayId: Clone + Copy + PartialEq>(
+async fn handle_message<T: PoolTypes>(
     m: Result<Option<Result<Message, tokio_tungstenite::tungstenite::Error>>, Elapsed>,
-    cs: &mut ConnectionState,
+    cs: &mut ConnectionState<T>,
     ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-    tx_for_events: &SenderWithId<RelayId>,
+    tx_for_events: &SenderWithId<T>,
     waiting_for_pong: &mut bool,
 ) -> bool {
     match m {
         Ok(Some(Ok(m))) => {
             *waiting_for_pong = false;
             match m {
-                Message::Text(t) => match RelayMessage::from_json(&t) {
+                Message::Text(t) => match serde_json::from_str::<RelayMessage<_>>(&t) {
                     Ok(m) => {
-                        match &m {
-                            RelayMessage::Notice { message } => {
+                        match m {
+                            RelayMessage::Notice(message) => {
                                 info!("notice from {}: {message}", cs.url);
                             }
-                            RelayMessage::Event { .. } => {
-                                tx_for_events.send(m).await;
+                            RelayMessage::Event(subscription_id, event) => {
+                                tx_for_events.send((subscription_id, event)).await;
                             }
-                            RelayMessage::Auth { challenge } => {
+                            RelayMessage::Auth(challenge) => {
                                 if let Some(keys) = &cs.auth_master_key {
-                                    let e = nostr::EventBuilder::auth(challenge, cs.url.clone())
-                                        .to_event(keys)
-                                        .unwrap();
-                                    let m = format!(r#"["AUTH",{}]"#, e.as_json());
+                                    let e = lnostr::EventBuilder::auth(&challenge, cs.url.as_str())
+                                        .to_event(keys);
+                                    let m = format!(
+                                        r#"["AUTH",{}]"#,
+                                        serde_json::to_string(&e).unwrap()
+                                    );
                                     debug!("{} <== {m}", cs.url);
                                     let _ = ws.send(Message::Text(m)).await;
                                 } else {
@@ -756,8 +744,8 @@ async fn handle_message<RelayId: Clone + Copy + PartialEq>(
                                 }
                             }
                             _ => {
-                                debug!("{} ==> {t}", cs.url);
-                                tx_for_events.send(m).await;
+                                debug!("ignored {} ==> {t}", cs.url);
+                                // tx_for_events.send(m).await;
                             }
                         }
                         false
@@ -809,17 +797,33 @@ async fn handle_message<RelayId: Clone + Copy + PartialEq>(
 }
 
 /// Messages sent by clients, received by relays
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ClientMessage {
+#[derive(Debug, PartialEq, Eq)]
+enum ClientMessage<T: PoolTypes> {
     /// Event
-    Event(Arc<Event>, Option<Arc<nostr::Keys>>),
+    Event(T::Event, Option<Arc<lnostr::Keypair>>),
     /// Req
     Req {
         /// Subscription ID
         subscription_id: FilterId,
         /// Filters
-        filters: Vec<Filter>,
+        filters: Arc<Vec<T::Filter>>,
     },
     /// Close
     Close(FilterId),
+}
+
+impl<T: PoolTypes> Clone for ClientMessage<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Event(arg0, arg1) => Self::Event(arg0.clone(), arg1.clone()),
+            Self::Req {
+                subscription_id,
+                filters,
+            } => Self::Req {
+                subscription_id: *subscription_id,
+                filters: filters.clone(),
+            },
+            Self::Close(arg0) => Self::Close(*arg0),
+        }
+    }
 }
