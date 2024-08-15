@@ -19,3 +19,4 @@ serde_json = "1.0.113"
 itertools = "0.13.0"
 rustc-hash = "2.0.0"
 lnostr = { git = "https://github.com/nanikamado/rockstr.git", rev = "a8ad655f5460bc0f173e4fb5ad551f03185be2b5" }
+cached = "0.53.1"
