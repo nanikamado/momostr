@@ -618,7 +618,8 @@ async fn get_event_from_note<'a>(
             }
             NoteTagForDe::Hashtag { name } => {
                 tags.insert(
-                    TagStandard::Hashtag(name.strip_prefix('#').unwrap_or(name).to_string()).into(),
+                    TagStandard::Hashtag(name.strip_prefix('#').unwrap_or(name).to_lowercase())
+                        .into(),
                 );
             }
         }
