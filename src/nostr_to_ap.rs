@@ -945,6 +945,9 @@ impl Note {
                 }
                 _ => (),
             }
+            if t.as_vec().first().map_or(false, |a| a == "nobridge") {
+                return None;
+            }
         }
         if author_opt_outed {
             return None;
