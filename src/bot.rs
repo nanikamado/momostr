@@ -3,15 +3,16 @@ use crate::server::AppState;
 use crate::{ADMIN_PUB, BOT_PUB, BOT_SEC, NPUB_REG, USER_ID_PREFIX};
 use nostr_lib::event::TagStandard;
 use nostr_lib::key::PublicKey;
-use nostr_lib::nips::nip04;
 use nostr_lib::nips::nip10::Marker;
 use nostr_lib::nips::nip19::FromBech32;
-use nostr_lib::types::{Filter, Timestamp};
+use nostr_lib::nips::nip59::UnwrappedGift;
+use nostr_lib::types::Filter;
 use nostr_lib::{Event, EventBuilder, Keys, Kind, Tag};
 use regex::Regex;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock as Lazy};
 use std::time::Duration;
+use tracing::info;
 
 async fn handle_command_from_nostr_account(
     state: &Arc<AppState>,
@@ -170,11 +171,11 @@ async fn handle_command_from_fediverse_account(
 pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     let command = NPUB_REG.replace_all(&event.content, "");
     let command = command.trim().to_lowercase();
-    let l = state.db.get_ap_id_of_npub(event.author_ref());
+    let l = state.db.get_ap_id_of_npub(&event.author());
     let response = if let Some(id) = l {
         handle_command_from_fediverse_account(state, &id, &command).await
     } else {
-        let npub = event.author_ref();
+        let npub = &event.author();
         handle_command_from_nostr_account(state, npub, &command).await
     };
 
@@ -223,6 +224,7 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     }
     let keys = Keys::new(BOT_SEC.clone());
     let e = EventBuilder::text_note(response, tags)
+        .custom_created_at(event.created_at)
         .to_event(&keys)
         .unwrap();
     state.nostr_send(Arc::new(e)).await;
@@ -232,13 +234,16 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
     static MENTION_REG: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"^(?:nostr:)?(npub1[0-9a-z]{50,}|nprofile1[0-9a-z]{50,})\s*").unwrap()
     });
-    let author = event.author_ref();
-    let Ok(command) = nip04::decrypt(&BOT_SEC, author, event.content.clone()) else {
+    let bot_keys = Keys::new(BOT_SEC.clone());
+    let Ok(r) = UnwrappedGift::from_gift_wrap(&bot_keys, &event) else {
         return;
     };
-    let command = command.trim();
+    let dm = r.rumor;
+    let author = dm.pubkey;
+    let command = &dm.content.trim();
+    info!("gift wrap: {command}");
     let command = MENTION_REG.replace(command, "");
-    let response = if author == &*BOT_PUB || Some(author) == ADMIN_PUB.as_ref() {
+    let response = if author == *BOT_PUB || Some(&author) == ADMIN_PUB.as_ref() {
         if command.starts_with("response:") {
             return;
         }
@@ -247,14 +252,12 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
             handle_command_from_admin(state, &command).await
         )
     } else {
-        handle_command_from_nostr_account(state, author, &command).await
+        handle_command_from_nostr_account(state, &author, &command).await
     };
-    let bot_keys = Keys::new(BOT_SEC.clone());
-    #[allow(deprecated)]
-    let e = EventBuilder::encrypted_direct_msg(&bot_keys, *author, response, Some(event.id))
-        .unwrap()
-        .custom_created_at(Timestamp::now().clamp(event.created_at + 1, event.created_at + 600))
-        .to_event(&bot_keys)
-        .unwrap();
+    let rumor = EventBuilder::private_msg_rumor(author, response, None)
+        .custom_created_at(dm.created_at + 1)
+        .to_unsigned_event(bot_keys.public_key());
+    info!("gift wrap: r: {rumor:?}");
+    let e = EventBuilder::gift_wrap(&bot_keys, &author, rumor, None).unwrap();
     state.nostr_send(Arc::new(e)).await;
 }

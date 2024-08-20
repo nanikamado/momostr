@@ -21,7 +21,7 @@ serde = { version = "1.0.196", features = ["derive", "rc"] }
 anyhow = "1.0.79"
 serde_json = "1.0.113"
 regex = "1.10.3"
-nostr_lib = { version = "0.33.0", package = "nostr" }
+nostr_lib = { git = "https://github.com/rust-nostr/nostr.git", package = "nostr", rev = "9af3866f188184cfc06816002de9cc2e5a91e53f" }
 rsa = "0.9.6"
 sha3 = "0.10.8"
 rand = "0.8.5"

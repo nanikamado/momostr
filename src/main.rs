@@ -153,7 +153,7 @@ async fn run() {
     for l in &*METADATA_RELAYS {
         metadata_relays.insert(relay_to_id(&nostr, l, &mut relay_to_id_map).await);
     }
-    let inbox_relays: Arc<FxHashSet<RelayId>> = Arc::new(inbox_relays);
+    // let inbox_relays: Arc<FxHashSet<RelayId>> = Arc::new(inbox_relays);
     let filter = get_filter();
     let event_stream = nostr.subscribe(filter.into(), inbox_relays.clone()).await;
     let http_client = reqwest::Client::new();
@@ -165,7 +165,7 @@ async fn run() {
         note_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1_000).unwrap())),
         nostr_user_cache: Mutex::new(TimedSizedCache::with_size_and_lifespan(1_000, 60 * 10)),
         db,
-        inbox_relays,
+        inbox_relays: Arc::new(inbox_relays),
         outbox_relays: Arc::new(outbox_relays),
         metadata_relays: Arc::new(metadata_relays),
         event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
@@ -197,12 +197,10 @@ fn get_filter() -> Vec<Filter> {
             ),
             ..Default::default()
         },
-        Filter {
-            since: Some(Timestamp::now() - Duration::from_secs(60 * 3)),
-            kinds: Some([Kind::EncryptedDirectMessage].into_iter().collect()),
-            ..Default::default()
-        }
-        .pubkey(*BOT_PUB),
+        Filter::default()
+            .kind(Kind::GiftWrap)
+            .limit(0)
+            .pubkey(*BOT_PUB),
     ]
 }
 

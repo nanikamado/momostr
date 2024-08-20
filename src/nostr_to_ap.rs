@@ -157,7 +157,7 @@ fn handle_event(
             let state = state.clone();
             tokio::spawn(async move {
                 let followers = {
-                    let followers = state.db.get_followers_of_nostr(event.author_ref());
+                    let followers = state.db.get_followers_of_nostr(&event.author());
                     if !ps.is_empty() || !followers.as_ref().map_or(true, |a| a.is_empty()) {
                         Some(followers.unwrap_or_default())
                     } else {
@@ -206,7 +206,7 @@ fn handle_event(
             });
         }
         nostr_lib::Kind::Reaction => {
-            if state.db.is_stopped_npub(event.author_ref()) {
+            if state.db.is_stopped_npub(&event.author()) {
                 return;
             }
             let mut e = None;
@@ -249,7 +249,7 @@ fn handle_event(
                 let Some(reacted_event) = state.get_note(e).await else {
                     return;
                 };
-                let reacted_p = reacted_event.event.author_ref();
+                let reacted_p = reacted_event.event.author();
                 let e = match get_ap_id_from_proxied_event(&reacted_event.event) {
                     Ok(a) => a,
                     Err(GetProxiedEventError::NotProxiedEvent) => {
@@ -260,9 +260,9 @@ fn handle_event(
                     }
                 };
                 let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
-                let followers = state.db.get_followers_of_nostr(reacted_p);
+                let followers = state.db.get_followers_of_nostr(&reacted_p);
                 let tmp: String;
-                let p = state.db.get_ap_id_of_npub(reacted_p);
+                let p = state.db.get_ap_id_of_npub(&reacted_p);
                 let activity = ReactionForSer {
                     actor: &author,
                     id: &event.id.to_bech32().unwrap(),
@@ -387,7 +387,7 @@ fn handle_event(
             }
         }
         nostr_lib::Kind::ContactList => {
-            if !state.db.is_stopped_npub(event.author_ref()) {
+            if !state.db.is_stopped_npub(&event.author()) {
                 let state = state.clone();
                 tokio::spawn(async move {
                     update_follow_list(&state, event).await;
@@ -395,7 +395,7 @@ fn handle_event(
             }
         }
         nostr_lib::Kind::Repost => {
-            if state.db.is_stopped_npub(event.author_ref()) {
+            if state.db.is_stopped_npub(&event.author()) {
                 return;
             }
             let mut e = None;
@@ -425,7 +425,7 @@ fn handle_event(
                         }
                     };
                     let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
-                    let followers = state.db.get_followers_of_nostr(event.author_ref());
+                    let followers = state.db.get_followers_of_nostr(&event.author());
                     let inboxes = broadcast_to_actors(
                         &state,
                         AnnounceForSer {
@@ -459,7 +459,7 @@ fn handle_event(
             }
         }
         nostr_lib::Kind::Metadata => {
-            let followers = state.db.get_followers_of_nostr(event.author_ref());
+            let followers = state.db.get_followers_of_nostr(&event.author());
             if !followers.as_ref().map_or(true, |a| a.is_empty()) {
                 if let Ok(metadata) = Metadata::from_json(&event.content) {
                     debug!("metadata update");
@@ -468,10 +468,8 @@ fn handle_event(
                     tokio::spawn(async move {
                         let metadata =
                             metadata_to_activity(&state, event.author(), &metadata).await;
-                        let actor = format!(
-                            "{USER_ID_PREFIX}{}",
-                            event.author_ref().to_bech32().unwrap()
-                        );
+                        let actor =
+                            format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
                         let published = event.created_at.to_human_datetime();
                         broadcast_to_actors(
                             &state,
@@ -490,7 +488,8 @@ fn handle_event(
                 }
             };
         }
-        nostr_lib::Kind::EncryptedDirectMessage => {
+        nostr_lib::Kind::GiftWrap => {
+            info!("gift wrap: ");
             let state = state.clone();
             tokio::spawn(async move {
                 handle_dm_message_to_bot(&state, event).await;
@@ -879,7 +878,7 @@ async fn get_ap_id_from_id_of_proxied_event(
 impl Note {
     #[tracing::instrument(skip_all)]
     pub async fn from_nostr_event(state: &Arc<AppState>, event: &Event) -> Option<Self> {
-        let author_opt_outed = state.db.is_stopped_npub(event.author_ref());
+        let author_opt_outed = state.db.is_stopped_npub(&event.author());
         let id = event.id.to_bech32().unwrap();
         let published = event.created_at.to_human_datetime();
         let mut handle_cache = FxHashMap::default();
@@ -976,10 +975,7 @@ impl Note {
                 }
             }
         }
-        let author = format!(
-            "{USER_ID_PREFIX}{}",
-            event.author_ref().to_bech32().unwrap()
-        );
+        let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
         let nevent = Nip19Event {
             event_id: event.id,
             author: None,
@@ -1052,7 +1048,7 @@ async fn get_ap_id_and_handle_from_public_key(
 pub async fn update_follow_list(state: &AppState, event: Arc<Event>) {
     let follow_list_old = state
         .db
-        .get_followee_of_nostr(event.author_ref())
+        .get_followee_of_nostr(&event.author())
         .unwrap_or_default();
     let follow_list_new: FxHashSet<_> = event
         .tags

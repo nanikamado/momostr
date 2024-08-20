@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 futures-util = "0.3.30"
 lru = "0.12.2"
-nostr = { version = "0.33.0", optional = true }
+nostr = { git = "https://github.com/rust-nostr/nostr.git", rev = "9af3866f188184cfc06816002de9cc2e5a91e53f", optional = true }
 nostr-types = { git = "https://github.com/mikedilger/nostr-types", rev = "18ea50d0ca2bf0f79571f05d5db2071f80d67d5c", optional = true }
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
 tokio-stream = { version = "0.1.15", features = ["sync"] }
