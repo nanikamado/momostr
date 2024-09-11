@@ -1152,12 +1152,12 @@ mod tests {
     use crate::server::AppState;
     use crate::util::RateLimiter;
     use crate::{RelayId, BOT_KEYPAIR, NOTE_ID_PREFIX, USER_AGENT};
-    use cached::TimedSizedCache;
+    use cached::{SizedCache, TimedSizedCache};
     use itertools::Itertools;
     use lru::LruCache;
     use nostr_lib::nips::nip19::Nip19Event;
     use nostr_lib::{FromBech32, ToBech32};
-    use parking_lot::Mutex;
+    use parking_lot::lock_api::Mutex;
     use relay_pool::RelayPool;
     use rustc_hash::{FxHashMap, FxHashSet};
     use std::num::NonZeroUsize;
@@ -1221,6 +1221,7 @@ mod tests {
                     inbox_relays: relays.clone(),
                     outbox_relays: relays,
                     event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
+                    handled_commands: Mutex::new(SizedCache::with_size(1000)),
                 })
             })
             .await

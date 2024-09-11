@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_macros::debug_handler;
-use cached::TimedSizedCache;
+use cached::{SizedCache, TimedSizedCache};
 use itertools::Itertools;
 use linkify::{LinkFinder, LinkKind};
 use lru::LruCache;
@@ -50,6 +50,7 @@ pub struct AppState {
     pub outbox_relays: Arc<FxHashSet<RelayId>>,
     pub metadata_relays: Arc<FxHashSet<RelayId>>,
     pub event_deletion_queue: EventDeletionQueue,
+    pub handled_commands: Mutex<SizedCache<nostr_lib::EventId, ()>>,
     pub db: Db,
 }
 

@@ -10,7 +10,7 @@ mod rsa_keys;
 mod server;
 mod util;
 
-use cached::TimedSizedCache;
+use cached::{SizedCache, TimedSizedCache};
 use db::Db;
 use event_deletion_queue::EventDeletionQueue;
 use html_to_md::FmtHtmlToMd;
@@ -169,6 +169,7 @@ async fn run() {
         outbox_relays: Arc::new(outbox_relays),
         metadata_relays: Arc::new(metadata_relays),
         event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
+        handled_commands: Mutex::new(SizedCache::with_size(1000)),
     });
 
     tokio::try_join!(

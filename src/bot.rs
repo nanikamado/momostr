@@ -1,6 +1,7 @@
 use crate::nostr_to_ap::update_follow_list;
 use crate::server::AppState;
 use crate::{ADMIN_PUB, BOT_PUB, BOT_SEC, NPUB_REG, USER_ID_PREFIX};
+use cached::Cached;
 use nostr_lib::event::TagStandard;
 use nostr_lib::key::PublicKey;
 use nostr_lib::nips::nip10::Marker;
@@ -169,6 +170,15 @@ async fn handle_command_from_fediverse_account(
 }
 
 pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
+    if state
+        .handled_commands
+        .lock()
+        .cache_set(event.id, ())
+        .is_some()
+    {
+        info!("this command is already handled");
+        return;
+    }
     let command = NPUB_REG.replace_all(&event.content, "");
     let command = command.trim().to_lowercase();
     let l = state.db.get_ap_id_of_npub(&event.author());
@@ -231,6 +241,16 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
 }
 
 pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
+    info!("gift wrap: handle_dm_message_to_bot");
+    if state
+        .handled_commands
+        .lock()
+        .cache_set(event.id, ())
+        .is_some()
+    {
+        info!("this command is already handled");
+        return;
+    }
     static MENTION_REG: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"^(?:nostr:)?(npub1[0-9a-z]{50,}|nprofile1[0-9a-z]{50,})\s*").unwrap()
     });
@@ -258,6 +278,8 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
         .custom_created_at(dm.created_at + 1)
         .to_unsigned_event(bot_keys.public_key());
     info!("gift wrap: r: {rumor:?}");
-    let e = EventBuilder::gift_wrap(&bot_keys, &author, rumor, None).unwrap();
+    let e = EventBuilder::gift_wrap(&bot_keys, &author, rumor.clone(), None).unwrap();
+    state.nostr_send(Arc::new(e)).await;
+    let e = EventBuilder::gift_wrap(&bot_keys, &bot_keys.public_key(), rumor, None).unwrap();
     state.nostr_send(Arc::new(e)).await;
 }
