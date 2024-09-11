@@ -145,7 +145,7 @@ impl AppState {
         let w = self.nostr_subscribe_rate.lock().wait();
         w.await;
         self.nostr
-            .subscribe(filters.into(), self.inbox_relays.clone())
+            .subscribe(filters.into(), (*self.inbox_relays).clone())
             .await
     }
 

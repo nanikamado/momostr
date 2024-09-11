@@ -85,6 +85,7 @@ struct SenderWithId<T: PoolTypes> {
 enum RelayMessage<T: PoolTypes> {
     Event(String, T::Event),
     Ok(T::EventId, bool, String),
+    Eose(String),
 }
 
 struct RelayMessageWithId<T: PoolTypes> {
@@ -141,17 +142,19 @@ impl<T: PoolTypes> ReceiverWithId<T> {
 
 enum RelayPoolOp<T: PoolTypes> {
     AddRelay(T::RelayId, url::Url, Option<Arc<lnostr::Keypair>>),
-    Subscribe(
-        u32,
-        Arc<Vec<T::Filter>>,
-        Sender<EventWithRelayId<T>>,
-        Arc<FxHashSet<T::RelayId>>,
-    ),
+    Subscribe(SubConfig<T>),
     Unsubscribe(u32),
-    ChangeFilter(u32, Vec<T::Filter>, Arc<FxHashSet<T::RelayId>>),
     Send(SendEvent<T>),
     Receive(RelayMessageWithId<T>),
     SetOkTracker(T::EventId, oneshot::Sender<(bool, String)>),
+}
+
+struct SubConfig<T: PoolTypes> {
+    sub_id: u32,
+    filters: Arc<Vec<T::Filter>>,
+    sender: Sender<EventWithRelayId<T>>,
+    relays: FxHashSet<T::RelayId>,
+    until_eose: bool,
 }
 
 impl<T: PoolTypes + 'static> RelayPool<T> {
@@ -187,12 +190,35 @@ impl<T: PoolTypes + 'static> RelayPool<T> {
     pub async fn subscribe(
         &self,
         filters: Arc<Vec<T::Filter>>,
-        relays: Arc<FxHashSet<T::RelayId>>,
+        relays: FxHashSet<T::RelayId>,
+    ) -> EventStream<T> {
+        self.subscribe_aux(filters, relays, false).await
+    }
+
+    pub async fn get_events(
+        &self,
+        filters: Arc<Vec<T::Filter>>,
+        relays: FxHashSet<T::RelayId>,
+    ) -> EventStream<T> {
+        self.subscribe_aux(filters, relays, true).await
+    }
+
+    pub async fn subscribe_aux(
+        &self,
+        filters: Arc<Vec<T::Filter>>,
+        relays: FxHashSet<T::RelayId>,
+        until_eose: bool,
     ) -> EventStream<T> {
         let (tx, rx) = tokio::sync::mpsc::channel(1_000);
         let id = self.counter.fetch_add(1, atomic::Ordering::Relaxed);
         self.queue_sender
-            .send(RelayPoolOp::Subscribe(id, filters, tx, relays))
+            .send(RelayPoolOp::Subscribe(SubConfig {
+                sub_id: id,
+                filters,
+                sender: tx,
+                relays,
+                until_eose,
+            }))
             .await
             .unwrap();
         EventStream {
@@ -203,28 +229,21 @@ impl<T: PoolTypes + 'static> RelayPool<T> {
         }
     }
 
-    pub async fn change_filter(
-        &self,
-        id: u32,
-        filters: Vec<T::Filter>,
-        relays: Arc<FxHashSet<T::RelayId>>,
-    ) {
-        self.queue_sender
-            .send(RelayPoolOp::ChangeFilter(id, filters, relays))
-            .await
-            .unwrap();
-    }
-
     pub async fn get_event_with_timeout(
         &self,
         f: T::Filter,
         timeout: Duration,
-        relays: Arc<FxHashSet<T::RelayId>>,
+        relays: FxHashSet<T::RelayId>,
     ) -> Option<EventWithRelayId<T>> {
-        tokio::time::timeout(timeout, self.subscribe(vec![f].into(), relays).await.next())
-            .await
-            .ok()
-            .flatten()
+        tokio::time::timeout(
+            timeout,
+            self.subscribe_aux(vec![f].into(), relays, true)
+                .await
+                .next(),
+        )
+        .await
+        .ok()
+        .flatten()
     }
 
     pub async fn send(
@@ -275,17 +294,14 @@ pub struct EventWithRelayId<T: PoolTypes> {
     pub relay_id: T::RelayId,
 }
 
-struct FilterAndSenders<T: PoolTypes> {
-    filter: Arc<Vec<T::Filter>>,
-    sender: Sender<EventWithRelayId<T>>,
+pub enum EventOrEose<T: PoolTypes> {
+    Event(EventWithRelayId<T>),
+    Eose,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct Req<T: PoolTypes>(FilterId, Arc<FxHashSet<T::RelayId>>);
-
 struct SubscriptionState<T: PoolTypes> {
-    sub_id_to_filter_id: HashMap<u32, Req<T>>,
-    filter_id_to_senders: FxHashMap<FilterId, FilterAndSenders<T>>,
+    sub_id_to_filter_id: HashMap<u32, FilterId>,
+    filter_id_to_senders: FxHashMap<FilterId, SubConfig<T>>,
     ok_subscription: TimedCache<T::EventId, oneshot::Sender<(bool, String)>>,
     id_pool: IdPool,
     broadcast_sender: tokio::sync::broadcast::Sender<RelayOp<T>>,
@@ -341,7 +357,7 @@ impl<T: PoolTypes + 'static> SubscriptionState<T> {
                 }
                 if let Ok(id) = subscription_id.to_string().parse() {
                     if let Some(f) = self.filter_id_to_senders.get(&id) {
-                        if f.filter.iter().any(|f| f.match_event(&event)) {
+                        if f.filters.iter().any(|f| f.match_event(&event)) {
                             let _ = f.sender.try_send(EventWithRelayId {
                                 event: event.clone(),
                                 relay_id: m.id,
@@ -350,7 +366,7 @@ impl<T: PoolTypes + 'static> SubscriptionState<T> {
                             warn!(
                                 "received event {} did not match the filter {}.",
                                 serde_json::to_string(&event).unwrap(),
-                                serde_json::to_string(&f.filter).unwrap()
+                                serde_json::to_string(&f.filters).unwrap()
                             );
                         }
                     } else {
@@ -363,22 +379,38 @@ impl<T: PoolTypes + 'static> SubscriptionState<T> {
                     let _ = a.send((status, message));
                 }
             }
+            RelayMessage::Eose(f_id) => {
+                if let Ok(f_id) = f_id.to_string().parse() {
+                    if let Some(f) = self.filter_id_to_senders.get_mut(&f_id) {
+                        if f.until_eose && f.relays.remove(&m.id) {
+                            broadcast(
+                                &self.broadcast_sender,
+                                RelayOp {
+                                    msg: ClientMessage::Close(f_id),
+                                    relays: Arc::new([m.id].into_iter().collect()),
+                                },
+                            );
+                            if f.relays.is_empty() {
+                                let id = f.sub_id;
+                                self.unsub(id);
+                            }
+                        }
+                    } else {
+                        debug!("subscription id {f_id} not found");
+                    }
+                }
+            }
         }
     }
 
     // common code among subscribe and filter change
     #[tracing::instrument(skip_all)]
-    fn sub(
-        &mut self,
-        id: u32,
-        filters: Arc<Vec<T::Filter>>,
-        tx: Sender<EventWithRelayId<T>>,
-        relays: Arc<FxHashSet<T::RelayId>>,
-    ) {
+    fn sub(&mut self, sub_config: SubConfig<T>) {
         let filter_id = FilterId(self.id_pool.request_id().unwrap());
         debug!(
             "starting connection with id {filter_id}, filters = [{}]",
-            filters
+            sub_config
+                .filters
                 .iter()
                 .format_with(", ", |a, f| f(&serde_json::to_string(a).unwrap()))
         );
@@ -387,39 +419,34 @@ impl<T: PoolTypes + 'static> SubscriptionState<T> {
             RelayOp {
                 msg: ClientMessage::Req {
                     subscription_id: filter_id,
-                    filters: filters.clone(),
+                    filters: sub_config.filters.clone(),
                 },
-                relays: relays.clone(),
+                relays: Arc::new(sub_config.relays.clone()),
             },
         );
-        self.sub_id_to_filter_id.insert(id, Req(filter_id, relays));
-        self.filter_id_to_senders.insert(
-            filter_id,
-            FilterAndSenders {
-                filter: filters,
-                sender: tx,
-            },
-        );
+        self.sub_id_to_filter_id
+            .insert(sub_config.sub_id, filter_id);
+        self.filter_id_to_senders.insert(filter_id, sub_config);
     }
 
     // common code among unsubscribe and filter change
     #[tracing::instrument(skip_all)]
-    fn unsub(&mut self, id: u32) -> Sender<EventWithRelayId<T>> {
-        let Req(filter_id, relays) = self.sub_id_to_filter_id.remove(&id).unwrap();
-        let f = self.filter_id_to_senders.remove(&filter_id).unwrap();
+    fn unsub(&mut self, id: u32) -> Option<()> {
+        let filter_id = self.sub_id_to_filter_id.remove(&id)?;
+        let f = self.filter_id_to_senders.remove(&filter_id)?;
         self.id_pool.return_id(filter_id.0).unwrap();
         broadcast(
             &self.broadcast_sender,
             RelayOp {
                 msg: ClientMessage::Close(filter_id),
-                relays,
+                relays: Arc::new(f.relays),
             },
         );
         debug!(
             "closed the connection of id {filter_id}: {}",
-            serde_json::to_string(&f.filter).unwrap()
+            serde_json::to_string(&f.filters).unwrap()
         );
-        f.sender
+        Some(())
     }
 
     async fn handle_op(&mut self, op: RelayPoolOp<T>) {
@@ -442,15 +469,11 @@ impl<T: PoolTypes + 'static> SubscriptionState<T> {
                     }
                 });
             }
-            RelayPoolOp::Subscribe(id, filters, tx, relays) => {
-                self.sub(id, filters, tx, relays);
+            RelayPoolOp::Subscribe(s) => {
+                self.sub(s);
             }
             RelayPoolOp::Unsubscribe(id) => {
                 self.unsub(id);
-            }
-            RelayPoolOp::ChangeFilter(id, filters, relays) => {
-                let tx = self.unsub(id);
-                self.sub(id, Arc::new(filters), tx, relays);
             }
             RelayPoolOp::Send(op) => {
                 broadcast(
@@ -793,6 +816,9 @@ async fn handle_message<T: PoolTypes>(
                                 tx_for_events
                                     .send(crate::RelayMessage::Ok(id, status, m))
                                     .await;
+                            }
+                            RelayMessage::Eose(sub_id) => {
+                                tx_for_events.send(crate::RelayMessage::Eose(sub_id)).await;
                             }
                             _ => {
                                 debug!("ignored {} ==> {t}", cs.url);
