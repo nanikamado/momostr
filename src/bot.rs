@@ -1,6 +1,6 @@
 use crate::nostr_to_ap::update_follow_list;
 use crate::server::AppState;
-use crate::{ADMIN_PUB, BOT_PUB, BOT_SEC, NPUB_REG, USER_ID_PREFIX};
+use crate::{RelayId, ADMIN_PUB, BOT_KEYPAIR, BOT_PUB, BOT_SEC, NPUB_REG, USER_ID_PREFIX};
 use cached::Cached;
 use nostr_lib::event::TagStandard;
 use nostr_lib::key::PublicKey;
@@ -10,10 +10,12 @@ use nostr_lib::nips::nip59::UnwrappedGift;
 use nostr_lib::types::Filter;
 use nostr_lib::{Event, EventBuilder, Keys, Kind, Tag};
 use regex::Regex;
+use rustc_hash::FxHashSet;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock as Lazy};
 use std::time::Duration;
 use tracing::info;
+use url::Url;
 
 async fn handle_command_from_nostr_account(
     state: &Arc<AppState>,
@@ -240,8 +242,8 @@ pub async fn handle_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
     state.nostr_send(Arc::new(e)).await;
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) {
-    info!("gift wrap: handle_dm_message_to_bot");
     if state
         .handled_commands
         .lock()
@@ -260,26 +262,71 @@ pub async fn handle_dm_message_to_bot(state: &Arc<AppState>, event: Arc<Event>) 
     };
     let dm = r.rumor;
     let author = dm.pubkey;
+    info!("dm = {dm:?}");
+    if author == *BOT_PUB {
+        return;
+    }
     let command = &dm.content.trim();
-    info!("gift wrap: {command}");
+    info!("command: {command}");
     let command = MENTION_REG.replace(command, "");
-    let response = if author == *BOT_PUB || Some(&author) == ADMIN_PUB.as_ref() {
-        if command.starts_with("response:") {
-            return;
-        }
-        format!(
-            "response: {}",
-            handle_command_from_admin(state, &command).await
-        )
+    let response = if Some(&author) == ADMIN_PUB.as_ref() {
+        handle_command_from_admin(state, &command).await
     } else {
         handle_command_from_nostr_account(state, &author, &command).await
     };
+    let e = state
+        .get_nostr_event_with_timeout_from_relays(
+            Filter::new().author(author).kind(Kind::from(10050)),
+            Duration::from_secs(10),
+            (*state.metadata_relays).clone(),
+        )
+        .await;
+    info!("e = {e:?}");
+    let inbox_relay_urls: Vec<_> = e
+        .map(|a| {
+            a.event
+                .tags
+                .iter()
+                .filter_map(|a| {
+                    if let Some(TagStandard::Relay(r)) = a.as_standardized() {
+                        Url::parse(&r.to_string()).ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    info!("inbox_relay_urls = {inbox_relay_urls:?}");
+    let mut inbox_relays = FxHashSet::default();
+    for l in inbox_relay_urls {
+        inbox_relays.insert(relay_to_id(state, l).await);
+    }
     let rumor = EventBuilder::private_msg_rumor(author, response, None)
         .custom_created_at(dm.created_at + 1)
         .to_unsigned_event(bot_keys.public_key());
-    info!("gift wrap: r: {rumor:?}");
-    let e = EventBuilder::gift_wrap(&bot_keys, &author, rumor.clone(), None).unwrap();
-    state.nostr_send(Arc::new(e)).await;
+    let e = Arc::new(EventBuilder::gift_wrap(&bot_keys, &author, rumor.clone(), None).unwrap());
+    state.nostr.send(e.clone(), None, inbox_relays.into()).await;
+    state.nostr_send(e.clone()).await;
     let e = EventBuilder::gift_wrap(&bot_keys, &bot_keys.public_key(), rumor, None).unwrap();
     state.nostr_send(Arc::new(e)).await;
+    info!("sent");
+}
+
+async fn relay_to_id(state: &Arc<AppState>, url: Url) -> RelayId {
+    let id = {
+        let mut relay_to_id_map = state.relay_to_id_map.lock();
+        if let Some(id) = relay_to_id_map.get(&url) {
+            return *id;
+        }
+        let id = RelayId(relay_to_id_map.len() as u32);
+        relay_to_id_map.insert(url.clone(), id);
+        id
+    };
+    state
+        .nostr
+        .add_relay(id, url, Some(BOT_KEYPAIR.clone()))
+        .await
+        .unwrap();
+    id
 }

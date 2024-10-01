@@ -170,6 +170,7 @@ async fn run() {
         metadata_relays: Arc::new(metadata_relays),
         event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
         handled_commands: Mutex::new(SizedCache::with_size(1000)),
+        relay_to_id_map: Mutex::new(relay_to_id_map),
     });
 
     tokio::try_join!(

@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::{Arc, LazyLock as Lazy};
 use tracing::{debug, info};
+use url::Url;
 
 type LazyNote = Arc<tokio::sync::OnceCell<Option<EventWithRelayId<PoolTypesInstance>>>>;
 type LazyUser = Arc<tokio::sync::OnceCell<Arc<Result<NostrUser, Error>>>>;
@@ -51,6 +52,7 @@ pub struct AppState {
     pub metadata_relays: Arc<FxHashSet<RelayId>>,
     pub event_deletion_queue: EventDeletionQueue,
     pub handled_commands: Mutex<SizedCache<nostr_lib::EventId, ()>>,
+    pub relay_to_id_map: Mutex<FxHashMap<Url, RelayId>>,
     pub db: Db,
 }
 

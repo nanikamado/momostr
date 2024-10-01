@@ -7,6 +7,7 @@ use nostr_lib::event::{Event, TagStandard};
 use nostr_lib::types::Filter;
 use nostr_lib::{EventId, JsonUtil, Kind, Metadata, PublicKey};
 use relay_pool::{EventWithRelayId, PoolTypes};
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::OnceCell;
@@ -49,7 +50,9 @@ pub async fn get_nostr_user_data_without_cache(
         limit: Some(1),
         ..Default::default()
     };
-    let mut sub = state.subscribe_filter(vec![f]).await;
+    let mut sub = state
+        .subscribe_filter(vec![f], (*state.inbox_relays).clone())
+        .await;
     let mut e = tokio::time::timeout(Duration::from_secs(10), sub.next())
         .await
         .ok()
@@ -140,13 +143,12 @@ impl AppState {
     pub async fn subscribe_filter(
         &self,
         filters: Vec<Filter>,
+        relays: FxHashSet<RelayId>,
     ) -> relay_pool::EventStream<PoolTypesInstance> {
         debug!("filter = {}", serde_json::to_string(&filters).unwrap());
         let w = self.nostr_subscribe_rate.lock().wait();
         w.await;
-        self.nostr
-            .subscribe(filters.into(), (*self.inbox_relays).clone())
-            .await
+        self.nostr.subscribe(filters.into(), relays).await
     }
 
     pub async fn nostr_send(&self, event: Arc<Event>) {
@@ -163,7 +165,25 @@ impl AppState {
         f: Filter,
         timeout: Duration,
     ) -> Option<EventWithRelayId<PoolTypesInstance>> {
-        tokio::time::timeout(timeout, self.subscribe_filter(vec![f]).await.next())
+        tokio::time::timeout(
+            timeout,
+            self.subscribe_filter(vec![f], (*self.inbox_relays).clone())
+                .await
+                .next(),
+        )
+        .await
+        .ok()
+        .flatten()
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn get_nostr_event_with_timeout_from_relays(
+        &self,
+        f: Filter,
+        timeout: Duration,
+        relays: FxHashSet<RelayId>,
+    ) -> Option<EventWithRelayId<PoolTypesInstance>> {
+        tokio::time::timeout(timeout, self.subscribe_filter(vec![f], relays).await.next())
             .await
             .ok()
             .flatten()

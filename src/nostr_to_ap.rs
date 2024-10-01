@@ -1222,6 +1222,7 @@ mod tests {
                     outbox_relays: relays,
                     event_deletion_queue: EventDeletionQueue::new(Arc::new(http_client)),
                     handled_commands: Mutex::new(SizedCache::with_size(1000)),
+                    relay_to_id_map: Default::default(),
                 })
             })
             .await
