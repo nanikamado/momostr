@@ -179,14 +179,18 @@ pub async fn nostr_json(
     State(state): State<Arc<AppState>>,
 ) -> Result<Response, Error> {
     debug!("nostr.json?name={name}");
-    let (name_decoded, host) = name.rsplit_once("_at_").ok_or_else(|| Error::NotFound)?;
+    let (name_decoded, host) = name
+        .rsplit_once("_at_")
+        .ok_or_else(|| Error::BadRequest(Some("could not parse name".to_string())))?;
     let host = host.replace(".at_", "at_");
     let id = state.get_ap_id_from_webfinger(name_decoded, &host).await?;
     let ActorOrProxied::Actor(actor) = state
         .get_actor_data_with_opts(&id, Some(name_decoded), &mut FxHashSet::default())
         .await?
     else {
-        return Err(Error::NotFound);
+        return Err(Error::BadRequest(Some(
+            "this account is already proxied".to_string(),
+        )));
     };
     let mut r = Json(json!({
         "names": {
