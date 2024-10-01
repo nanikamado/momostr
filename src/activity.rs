@@ -728,34 +728,42 @@ impl AppState {
         actor_visited: &mut FxHashSet<String>,
     ) -> Result<bool, Error> {
         static R: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[[:word:].-]+$").unwrap());
-        let nip05 = match (Url::parse(&actor.id)?.domain(), &actor.preferred_username) {
-            (Some(domain), Some(name)) if R.is_match(name) => {
-                let n = format!(
-                    "{}_at_{}@momostr.pink",
-                    name.to_lowercase(),
-                    domain.replace("at_", ".at_")
-                );
-                if webfinger == Some(name) {
-                    Some(n)
-                } else {
-                    match self.get_ap_id_from_webfinger(name, domain).await {
-                        Ok(id) => {
-                            if id == actor.id {
-                                Some(n)
-                            } else {
-                                warn!("preferred username is invalid: {}", actor.id);
-                                None
-                            }
-                        }
-                        Err(e) => {
-                            warn!("could not get ap id from webfinger: {e:?}");
-                            None
-                        }
+        let id = Url::parse(&actor.id)?;
+        let domain = id
+            .domain()
+            .ok_or_else(|| Error::BadRequest(Some("could not parse id".to_string())))?;
+        let name = actor
+            .preferred_username
+            .as_ref()
+            .ok_or_else(|| Error::BadRequest(Some("preferredUsername is needed".to_string())))?;
+        if R.is_match(name) {
+            return Err(Error::BadRequest(Some(
+                "preferredUsername should be [a-z0-9-_.]+".to_string(),
+            )));
+        }
+        if webfinger != Some(name) {
+            match self.get_ap_id_from_webfinger(name, domain).await {
+                Ok(id) => {
+                    if id != actor.id {
+                        warn!("preferred username is invalid: {}", actor.id);
+                        return Err(Error::BadRequest(Some(
+                            "preferred username is invalid".to_string(),
+                        )));
                     }
                 }
+                Err(e) => {
+                    warn!("could not get ap id from webfinger: {e:?}");
+                    return Err(Error::BadRequest(Some(
+                        "could not get ap id from webfinger".to_string(),
+                    )));
+                }
             }
-            _ => None,
-        };
+        }
+        let nip05 = format!(
+            "{}_at_{}@momostr.pink",
+            name.to_lowercase(),
+            domain.replace("at_", ".at_")
+        );
         let key = nostr_lib::Keys::new(actor.nsec.clone());
         let mut first_property = true;
         let mut lud16 = None;
@@ -793,7 +801,7 @@ impl AppState {
                 website: Some(actor.url.clone().unwrap_or_else(|| actor.id.clone())),
                 picture: actor.icon.clone(),
                 banner: actor.image.clone(),
-                nip05,
+                nip05: Some(nip05),
                 lud16,
                 ..Default::default()
             }
