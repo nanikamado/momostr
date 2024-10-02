@@ -917,18 +917,16 @@ impl AppState {
     pub async fn get_ap_id_from_webfinger(&self, name: &str, host: &str) -> Result<String, Error> {
         let name_host = format!("{name}@{host}");
         if let Some(a) = self.db.string_cache.get(&name_host) {
-            return if a.is_empty() {
-                Err(Error::NotFound)
-            } else {
-                Ok(a)
-            };
+            if !a.is_empty() {
+                return Ok(a);
+            }
         }
         let a = self
             .get_ap_id_from_webfinger_without_cache(name, host)
             .await;
-        self.db
-            .string_cache
-            .insert(&name_host, a.as_ref().map(|a| a.as_str()).unwrap_or(""));
+        if let Ok(a) = &a {
+            self.db.string_cache.insert(&name_host, a);
+        }
         a
     }
 }
