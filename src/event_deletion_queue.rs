@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info};
 
 #[derive(Debug)]
-pub struct EventDeletionQueue(tokio::sync::mpsc::Sender<(EventId, SecretKey)>);
+pub struct EventDeletionQueue(tokio::sync::mpsc::Sender<(EventId, nostr_lib::Kind, SecretKey)>);
 
 impl EventDeletionQueue {
     pub fn new(http_client: Arc<reqwest::Client>) -> Self {
@@ -29,7 +29,7 @@ impl EventDeletionQueue {
                 }
                 let ids = buff
                     .iter()
-                    .format_with(", ", |(e, _), f| f(&format_args!("{e}")))
+                    .format_with(", ", |(e, _, _), f| f(&format_args!("{e}")))
                     .to_string();
                 debug!("start deletion of {ids}");
                 if let Err(e) = delete_async(buff, &http_client, &ids).await {
@@ -41,8 +41,8 @@ impl EventDeletionQueue {
         Self(sender)
     }
 
-    pub fn delete(&self, event_id: EventId, nsec: SecretKey) {
-        if let Err(e) = self.0.try_send((event_id, nsec)) {
+    pub fn delete(&self, event_id: EventId, k: nostr_lib::Kind, nsec: SecretKey) {
+        if let Err(e) = self.0.try_send((event_id, k, nsec)) {
             error!("{e}")
         }
     }
@@ -50,7 +50,7 @@ impl EventDeletionQueue {
 
 #[tracing::instrument(skip_all)]
 async fn delete_async(
-    es: Vec<(EventId, SecretKey)>,
+    es: Vec<(EventId, nostr_lib::Kind, SecretKey)>,
     http_client: &reqwest::Client,
     ids_for_log: &str,
 ) -> Result<(), Error> {
@@ -60,19 +60,21 @@ async fn delete_async(
         .await?
         .json()
         .await?;
-    let mut m: FxHashMap<_, (_, FxHashSet<_>)> = FxHashMap::default();
-    for (event_id, nsec) in es {
-        m.entry(*nsec.as_ref())
-            .or_insert((nsec, FxHashSet::default()))
-            .1
-            .insert(event_id);
+    let mut m: FxHashMap<_, (_, _, FxHashSet<_>)> = FxHashMap::default();
+    for (event_id, k, nsec) in es {
+        let (_, ks, es) =
+            m.entry(*nsec.as_ref())
+                .or_insert((nsec, FxHashSet::default(), FxHashSet::default()));
+        ks.insert(k);
+        es.insert(event_id);
     }
     let es = m
         .into_iter()
-        .map(|(_, (nsec, ids))| {
+        .map(|(_, (nsec, ks, ids))| {
             serde_json::to_string(&ClientMessage(
                 EventBuilder::delete(ids)
                     .add_tags([TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()])
+                    .add_tags(ks.iter().map(|k| TagStandard::Kind(*k).into()))
                     .to_event(&Keys::new(nsec))
                     .unwrap(),
             ))

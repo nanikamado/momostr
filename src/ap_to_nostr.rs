@@ -146,33 +146,24 @@ pub async fn http_post_inbox(
                     state.nostr_send(Arc::new(l)).await;
                 }
             }
-            ActivityForDeInner::Like { id, .. } | ActivityForDeInner::Announce { id, .. } => {
+            ActivityForDeInner::Like { id, .. } => {
                 debug!("undo like {id}");
-                let object_id = InternalApId::get(Cow::Owned(id.to_string()), actor_id.as_ref())?;
-                if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
-                    let nsec = actor.nsec.clone();
-                    tokio::spawn(async move {
-                        let keys = nostr_lib::Keys::new(nsec.clone());
-                        state
-                            .nostr_send(Arc::new(
-                                EventBuilder::delete([e])
-                                    .add_tags([TagStandard::LabelNamespace(
-                                        REVERSE_DNS.to_string(),
-                                    )
-                                    .into()])
-                                    .to_event(&keys)
-                                    .unwrap(),
-                            ))
-                            .await;
-                    });
-                } else {
-                    info!("tried to delete a event but could not find it");
-                }
+                delete_event(&id, &actor_id, &actor, nostr_lib::Kind::Reaction, state)?;
+            }
+            ActivityForDeInner::Announce { id, .. } => {
+                debug!("undo repost {id}");
+                delete_event(&id, &actor_id, &actor, nostr_lib::Kind::Repost, state)?;
             }
             _ => {
                 info!("undo of this activity is not supported: {object:?}");
             }
         },
+        ActivityForDeInner::Delete {
+            object: StrOrId(id),
+        } => {
+            debug!("delete post {id}");
+            delete_event(&id, &actor_id, &actor, nostr_lib::Kind::TextNote, state)?;
+        }
         ActivityForDeInner::Create { object } => {
             debug!("create");
             if let Some(npub) = object
@@ -218,7 +209,7 @@ pub async fn http_post_inbox(
             let mut tags = vec![
                 Tag::event(note.id),
                 Tag::public_key(note.pubkey),
-                TagStandard::Kind(nostr_lib::event::Kind::TextNote).into(),
+                TagStandard::Kind(nostr_lib::Kind::TextNote).into(),
             ];
             let mut content_converted = Cow::Borrowed("+");
             if let Some(content) = content {
@@ -313,31 +304,6 @@ pub async fn http_post_inbox(
                 send_event(&state, Arc::new(event), ap_id.into_owned()).await;
             }
         }
-        ActivityForDeInner::Delete {
-            object: StrOrId(id),
-        } => {
-            let object_id = InternalApId::get(Cow::Owned(id.to_string()), actor_id.as_ref())?;
-            if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
-                info!("sending delete request ...");
-                let nsec = actor.nsec.clone();
-                tokio::spawn(async move {
-                    let keys = nostr_lib::Keys::new(nsec.clone());
-                    state
-                        .nostr_send(Arc::new(
-                            EventBuilder::delete([e])
-                                .add_tags([
-                                    TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()
-                                ])
-                                .to_event(&keys)
-                                .unwrap(),
-                        ))
-                        .await;
-                    state.event_deletion_queue.delete(e, nsec)
-                });
-            } else {
-                info!("tried to delete a event but could not find it");
-            }
-        }
         ActivityForDeInner::Update { object } => {
             info!("update of actor");
             if let ActorOrProxied::Actor(actor) = &object {
@@ -350,6 +316,37 @@ pub async fn http_post_inbox(
         ActivityForDeInner::Other(a) => {
             info!("not implemented {}", a);
         }
+    }
+    Ok(())
+}
+
+fn delete_event(
+    id: &str,
+    actor_id: &str,
+    actor: &Actor,
+    k: nostr_lib::Kind,
+    state: Arc<AppState>,
+) -> Result<(), Error> {
+    let object_id = InternalApId::get(Cow::Owned(id.to_string()), actor_id)?;
+    if let Some(e) = state.db.get_event_id_from_ap_id(&object_id) {
+        let nsec = actor.nsec.clone();
+        tokio::spawn(async move {
+            let keys = nostr_lib::Keys::new(nsec.clone());
+            state
+                .nostr_send(Arc::new(
+                    EventBuilder::delete([e])
+                        .add_tags([
+                            TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into(),
+                            TagStandard::Kind(k).into(),
+                        ])
+                        .to_event(&keys)
+                        .unwrap(),
+                ))
+                .await;
+            state.event_deletion_queue.delete(e, k, nsec)
+        });
+    } else {
+        info!("tried to delete a event but could not find it");
     }
     Ok(())
 }
