@@ -10,7 +10,7 @@ nostr = { git = "https://github.com/rust-nostr/nostr.git", rev = "9af3866f188184
 nostr-types = { git = "https://github.com/mikedilger/nostr-types", rev = "18ea50d0ca2bf0f79571f05d5db2071f80d67d5c", optional = true }
 tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
 tokio-stream = { version = "0.1.15", features = ["sync"] }
-tokio-tungstenite = { version = "0.23.1", features = ["default", "native-tls"] }
+tokio-tungstenite = { version = "0.24.0", features = ["default", "native-tls"] }
 tracing = "0.1.40"
 url = "2.5.0"
 id-pool = { version = "0.2.2", features = ["u32"], default-features = false }
