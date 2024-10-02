@@ -4,7 +4,7 @@ use crate::rsa_keys::{RSA_PRIVATE_KEY, RSA_PRIVATE_KEY_FOR_SIGH};
 use crate::server::{event_tag, AppState, WithContext};
 use crate::{
     html_to_text, HTTPS_DOMAIN, INBOX_RELAYS_FOR_10002, KEY_ID, NOTE_ID_PREFIX,
-    OUTBOX_RELAYS_FOR_10002, SECRET_KEY, USER_AGENT, USER_ID_PREFIX,
+    OUTBOX_RELAYS_FOR_10002, REVERSE_DNS, SECRET_KEY, USER_AGENT, USER_ID_PREFIX,
 };
 use axum::http::{Method, Request};
 use base64::Engine;
@@ -849,6 +849,7 @@ impl AppState {
                 .collect()
         });
         let kind10002 = EventBuilder::relay_list(MAIL_BOX.clone())
+            .add_tags([nostr_lib::TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()])
             .to_event(&key)
             .unwrap();
         tokio::join!(
