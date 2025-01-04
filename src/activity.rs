@@ -739,7 +739,8 @@ impl AppState {
             .preferred_username
             .as_ref()
             .ok_or_else(|| Error::BadRequest(Some("preferredUsername is needed".to_string())))?;
-        if R.is_match(name) {
+        if !R.is_match(name) {
+            tracing::error!("preferredUsername {name} can not be accepted");
             return Err(Error::BadRequest(Some(
                 "preferredUsername should be [a-z0-9-_.]+".to_string(),
             )));
