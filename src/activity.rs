@@ -692,9 +692,13 @@ impl AppState {
             .map_err(|e| {
                 Error::BadRequest(Some(format!("could not get user data from {id}: {e:?}")))
             })?;
-        if !actor.from_cache {
+        if actor.from_cache {
+            debug!("did not update metadata of {id} because cache was found");
+        } else {
+            debug!("update metadata of {id}");
             self.update_actor_metadata(&actor.value, webfinger, actor_visited)
-                .await?;
+                .await
+                .inspect_err(|e| debug!("failed to update metadata of {id}: {e:?}"))?;
         }
         Ok(actor.value)
     }
