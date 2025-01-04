@@ -582,17 +582,16 @@ impl AppState {
         url: &Url,
         cache: bool,
     ) -> Result<MaybeFromCache<T>, Error> {
-        let mut from_cache = false;
         let t = if cache {
-            self.db
-                .string_cache
-                .get(url.as_str())
-                .inspect(|_| from_cache = true)
+            self.db.string_cache.get(url.as_str())
         } else {
             None
         };
-        let t = if let Some(t) = t {
-            t
+        if let Some(t) = t {
+            Ok(MaybeFromCache {
+                value: serde_json::from_str(&t)?,
+                from_cache: true,
+            })
         } else {
             let digest = sha2::Sha256::digest([]);
             let digest = base64::prelude::BASE64_STANDARD.encode(digest);
@@ -623,15 +622,15 @@ impl AppState {
                 .text()
                 .await?;
             debug!("{url} ==> {t}");
+            let value = serde_json::from_str(&t)?;
             if cache {
                 self.db.string_cache.insert(url.as_str(), &t);
             }
-            t
-        };
-        Ok(MaybeFromCache {
-            value: serde_json::from_str(&t)?,
-            from_cache,
-        })
+            Ok(MaybeFromCache {
+                value,
+                from_cache: false,
+            })
+        }
     }
 
     pub async fn get_activity_json<T: DeserializeOwned>(
