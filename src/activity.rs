@@ -875,13 +875,14 @@ impl AppState {
         host: &str,
     ) -> Result<String, Error> {
         #[derive(Deserialize, Debug)]
-        struct WebfingerResponse {
-            links: Vec<WebfingerLink>,
+        struct WebfingerResponse<'a> {
+            links: Vec<WebfingerLink<'a>>,
         }
         #[derive(Deserialize, Debug)]
-        struct WebfingerLink {
+        struct WebfingerLink<'a> {
             r#type: Option<mediatype::MediaTypeBuf>,
             href: Option<String>,
+            rel: Cow<'a, str>,
         }
         let WebfingerResponse { links } = self
             .http_client
@@ -902,15 +903,16 @@ impl AppState {
         let id = links
             .into_iter()
             .find(|l| {
-                if let Some(t) = &l.r#type {
-                    t.ty() == mediatype::names::APPLICATION
-                        && t.suffix() == Some(mediatype::names::JSON)
-                        && (t.subty() == mediatype::names::ACTIVITY
-                            || t.subty() == mediatype::names::LD
-                                && t.get_param(param_profile) == Some(value_activitystreams))
-                } else {
-                    false
-                }
+                l.rel == "self"
+                    && if let Some(t) = &l.r#type {
+                        t.ty() == mediatype::names::APPLICATION
+                            && t.suffix() == Some(mediatype::names::JSON)
+                            && (t.subty() == mediatype::names::ACTIVITY
+                                || t.subty() == mediatype::names::LD
+                                    && t.get_param(param_profile) == Some(value_activitystreams))
+                    } else {
+                        false
+                    }
             })
             .ok_or(Error::NotFound)?
             .href
