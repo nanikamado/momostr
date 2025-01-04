@@ -277,31 +277,34 @@ pub async fn http_post_inbox(
                 error!("repost {} already exists", id);
                 return Ok(());
             }
-            if let Ok(event) =
-                get_event_from_object_id(&state, object.0.to_string(), Cow::Borrowed(&[])).await
-            {
-                let keys = nostr_lib::Keys::new(actor.nsec.clone());
-                let event = EventBuilder::new(
-                    nostr_lib::Kind::Repost,
-                    "",
-                    event_tag(
-                        id.to_string(),
-                        [
-                            TagStandard::Event {
-                                event_id: event.event.id,
-                                relay_url: None,
-                                marker: None,
-                                public_key: Some(event.event.author()),
-                            }
-                            .into(),
-                            Tag::public_key(event.event.pubkey),
-                        ],
-                    ),
-                )
-                .custom_created_at(Timestamp::from(published.timestamp() as u64))
-                .to_event(&keys)
-                .unwrap();
-                send_event(&state, Arc::new(event), ap_id.into_owned()).await;
+            match get_event_from_object_id(&state, object.0.to_string(), Cow::Borrowed(&[])).await {
+                Ok(event) => {
+                    let keys = nostr_lib::Keys::new(actor.nsec.clone());
+                    let event = EventBuilder::new(
+                        nostr_lib::Kind::Repost,
+                        "",
+                        event_tag(
+                            id.to_string(),
+                            [
+                                TagStandard::Event {
+                                    event_id: event.event.id,
+                                    relay_url: None,
+                                    marker: None,
+                                    public_key: Some(event.event.author()),
+                                }
+                                .into(),
+                                Tag::public_key(event.event.pubkey),
+                            ],
+                        ),
+                    )
+                    .custom_created_at(Timestamp::from(published.timestamp() as u64))
+                    .to_event(&keys)
+                    .unwrap();
+                    send_event(&state, Arc::new(event), ap_id.into_owned()).await;
+                }
+                Err(e) => {
+                    info!("could not process repost {id}: {e:?}")
+                }
             }
         }
         ActivityForDeInner::Update { object } => {
@@ -449,12 +452,13 @@ async fn get_event_from_object_id<'a>(
     }
     let note: NoteForDe = state
         .get_activity_json(
-            &url.parse::<Url>()
-                .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?,
+            &url.parse::<Url>().map_err(|e| {
+                NostrConversionError::CouldNotGetObjectFromAp(Error::Internal(Arc::new(e.into())))
+            })?,
             false,
         )
         .await
-        .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?
+        .map_err(NostrConversionError::CouldNotGetObjectFromAp)?
         .value;
     if let Some(event_id) = &note.url.proxied_from {
         let event_id = nostr_lib::EventId::from_bech32(event_id)
@@ -467,7 +471,7 @@ async fn get_event_from_object_id<'a>(
     let ActorOrProxied::Actor(actor) = state
         .get_actor_data(&note.attributed_to)
         .await
-        .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?
+        .map_err(NostrConversionError::CouldNotGetObjectFromAp)?
     else {
         return Err(NostrConversionError::IsProxied);
     };
@@ -484,7 +488,7 @@ async fn get_npub_of_actor(state: &AppState, id: &str) -> Result<PublicKey, Nost
     match state
         .get_actor_data(id)
         .await
-        .map_err(|_| NostrConversionError::CouldNotGetObjectFromAp)?
+        .map_err(NostrConversionError::CouldNotGetObjectFromAp)?
     {
         ActorOrProxied::Proxied(a) => {
             PublicKey::from_bech32(&*a).map_err(|_| NostrConversionError::InvalidEventId)
@@ -506,13 +510,15 @@ static HEAD_MENTIONS_REGEX: Lazy<Regex> = Lazy::new(|| {
 });
 
 #[derive(Debug)]
+// fields are used on debug
+#[allow(dead_code)]
 enum NostrConversionError {
     IsPrivate,
     OptOutedAccount,
     IsProxied,
     CyclicReference,
     CouldNotGetEventFromNostr,
-    CouldNotGetObjectFromAp,
+    CouldNotGetObjectFromAp(Error),
     InvalidEventId,
     InvalidActorId,
     TooLongThread,
