@@ -408,7 +408,7 @@ pub enum ActivityForDeInner<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StrOrId<'a>(pub Cow<'a, str>);
 
-impl<'a, 'b> Deserialize<'a> for StrOrId<'b> {
+impl<'a> Deserialize<'a> for StrOrId<'_> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'a>,
@@ -437,7 +437,7 @@ pub struct AcceptActivity<'a> {
     pub actor: &'a str,
 }
 
-impl<'a> Serialize for AcceptActivity<'a> {
+impl Serialize for AcceptActivity<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -1214,7 +1214,7 @@ where
     D: serde::Deserializer<'de>,
 {
     struct Visitor;
-    impl<'de> serde::de::Visitor<'de> for Visitor {
+    impl serde::de::Visitor<'_> for Visitor {
         type Value = sigh::PublicKey;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
