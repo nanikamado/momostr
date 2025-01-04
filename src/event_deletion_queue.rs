@@ -48,6 +48,29 @@ impl EventDeletionQueue {
     }
 }
 
+pub fn create_deletion_events(es: Vec<(EventId, nostr_lib::Kind, SecretKey)>) -> Vec<String> {
+    let mut m: FxHashMap<_, (_, _, FxHashSet<_>)> = FxHashMap::default();
+    for (event_id, k, nsec) in es {
+        let (_, ks, es) =
+            m.entry(*nsec.as_ref())
+                .or_insert((nsec, FxHashSet::default(), FxHashSet::default()));
+        ks.insert(k);
+        es.insert(event_id);
+    }
+    m.into_iter()
+        .map(|(_, (nsec, ks, ids))| {
+            serde_json::to_string(&ClientMessage(
+                EventBuilder::delete(ids)
+                    .add_tags([TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()])
+                    .add_tags(ks.iter().map(|k| TagStandard::Kind(*k).into()))
+                    .to_event(&Keys::new(nsec))
+                    .unwrap(),
+            ))
+            .unwrap()
+        })
+        .collect_vec()
+}
+
 #[tracing::instrument(skip_all)]
 async fn delete_async(
     es: Vec<(EventId, nostr_lib::Kind, SecretKey)>,
@@ -60,27 +83,7 @@ async fn delete_async(
         .await?
         .json()
         .await?;
-    let mut m: FxHashMap<_, (_, _, FxHashSet<_>)> = FxHashMap::default();
-    for (event_id, k, nsec) in es {
-        let (_, ks, es) =
-            m.entry(*nsec.as_ref())
-                .or_insert((nsec, FxHashSet::default(), FxHashSet::default()));
-        ks.insert(k);
-        es.insert(event_id);
-    }
-    let es = m
-        .into_iter()
-        .map(|(_, (nsec, ks, ids))| {
-            serde_json::to_string(&ClientMessage(
-                EventBuilder::delete(ids)
-                    .add_tags([TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()])
-                    .add_tags(ks.iter().map(|k| TagStandard::Kind(*k).into()))
-                    .to_event(&Keys::new(nsec))
-                    .unwrap(),
-            ))
-            .unwrap()
-        })
-        .collect_vec();
+    let es = create_deletion_events(es);
     let relays_len = relays.len();
     for (i, r) in relays.into_iter().enumerate() {
         let mut req = r.as_str().into_client_request()?;

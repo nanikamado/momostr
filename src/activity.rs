@@ -966,6 +966,14 @@ pub static HASHTAG_LINK_REGEX: Lazy<Regex> = Lazy::new(|| {
     .unwrap()
 });
 
+pub fn ap_id_to_nsec(ap_id: &str) -> nostr_lib::SecretKey {
+    let mut hasher = Sha3_256::default();
+    hasher.update(ap_id.as_bytes());
+    hasher.update(SECRET_KEY.as_bytes());
+    let hash = hasher.finalize_fixed();
+    nostr_lib::SecretKey::from_slice(&hash).unwrap()
+}
+
 impl<'a> Deserialize<'a> for ActorOrProxied {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -977,11 +985,7 @@ impl<'a> Deserialize<'a> for ActorOrProxied {
                 .replace_all(&html_to_text(&a), "$tag")
                 .into_owned()
         });
-        let mut hasher = Sha3_256::default();
-        hasher.update(a.id.as_bytes());
-        hasher.update(SECRET_KEY.as_bytes());
-        let hash = hasher.finalize_fixed();
-        let nsec = nostr_lib::SecretKey::from_slice(&hash).unwrap();
+        let nsec = ap_id_to_nsec(&a.id);
         if let Some(npub) = a.url.proxied_from {
             Ok(ActorOrProxied::Proxied(Arc::new(npub)))
         } else if let Some(ProxyOf { proxied: npub }) = a.proxy_of {

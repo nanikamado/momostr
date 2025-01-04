@@ -1,16 +1,20 @@
+use crate::activity::ap_id_to_nsec;
+use crate::event_deletion_queue::create_deletion_events;
 use crate::nostr_to_ap::update_follow_list;
 use crate::server::AppState;
 use crate::{RelayId, ADMIN_PUB, BOT_KEYPAIR, BOT_PUB, BOT_SEC, NPUB_REG, USER_ID_PREFIX};
 use cached::Cached;
-use nostr_lib::event::TagStandard;
+use nostr_lib::event::{EventId, TagStandard};
 use nostr_lib::key::PublicKey;
 use nostr_lib::nips::nip10::Marker;
 use nostr_lib::nips::nip19::FromBech32;
 use nostr_lib::nips::nip59::UnwrappedGift;
 use nostr_lib::types::Filter;
+use nostr_lib::util::JsonUtil;
 use nostr_lib::{Event, EventBuilder, Keys, Kind, Tag};
 use regex::Regex;
 use rustc_hash::FxHashSet;
+use serde::Deserialize;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock as Lazy};
 use std::time::Duration;
@@ -81,6 +85,7 @@ async fn handle_command_from_nostr_account(
 
 async fn handle_command_from_admin(state: &Arc<AppState>, command: &str) -> String {
     if let Some(npub) = command.strip_prefix("stop ") {
+        let npub = npub.strip_prefix("nostr:").unwrap_or(npub);
         if let Ok(npub) = PublicKey::from_bech32(npub) {
             let stopped = state.db.is_stopped_npub(&npub);
             if stopped {
@@ -93,6 +98,7 @@ async fn handle_command_from_admin(state: &Arc<AppState>, command: &str) -> Stri
             "error".to_string()
         }
     } else if let Some(npub) = command.strip_prefix("restart ") {
+        let npub = npub.strip_prefix("nostr:").unwrap_or(npub);
         if let Ok(npub) = PublicKey::from_bech32(npub) {
             let stopped = state.db.is_stopped_npub(&npub);
             if stopped {
@@ -125,7 +131,6 @@ async fn handle_command_from_admin(state: &Arc<AppState>, command: &str) -> Stri
             let inbox = url::Url::from_str(cs.get(2)?.as_str()).ok()?;
             let activity = cs.get(3)?.as_str();
             let author = format!("{USER_ID_PREFIX}{npub}");
-
             if let Err(e) = state
                 .send_string_activity(&inbox, author, activity.to_string())
                 .await
@@ -138,6 +143,42 @@ async fn handle_command_from_admin(state: &Arc<AppState>, command: &str) -> Stri
         send_activity(state, s)
             .await
             .unwrap_or_else(|| "error".to_string())
+    } else if let Some(s) = command.strip_prefix("delete") {
+        #[derive(Deserialize, Clone, Debug)]
+        struct Target {
+            id: EventId,
+            pubkey: PublicKey,
+            kind: u16,
+        }
+        if let Ok(a) = serde_json::from_str::<Vec<Target>>(s) {
+            let mut es = Vec::with_capacity(a.len());
+            for a in a {
+                if let Some(ap_id) = state.db.get_ap_id_of_npub(&a.pubkey) {
+                    let event_id = a.id;
+                    let k = Kind::from(a.kind);
+                    let nsec = ap_id_to_nsec(&ap_id);
+                    state.event_deletion_queue.delete(a.id, k, nsec.clone());
+                    es.push((event_id, k, nsec));
+                }
+            }
+            create_deletion_events(es).join("\n")
+        } else {
+            "could not parse the json".to_string()
+        }
+    } else if let Some(npub) = command.strip_prefix("blank profile ") {
+        let npub = npub.strip_prefix("nostr:").unwrap_or(npub);
+        if let Ok(npub) = PublicKey::from_bech32(npub) {
+            if let Some(ap_id) = state.db.get_ap_id_of_npub(&npub) {
+                EventBuilder::new(nostr_lib::Kind::Metadata, r#"{"name":""}"#, [])
+                    .to_event(&Keys::new(ap_id_to_nsec(&ap_id)))
+                    .unwrap()
+                    .as_json()
+            } else {
+                "error".to_string()
+            }
+        } else {
+            "error".to_string()
+        }
     } else {
         format!("Command `{command}` is not supported.")
     }
