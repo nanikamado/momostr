@@ -766,7 +766,7 @@ pub async fn rewrite_mentions<'a: 'async_recursion>(
     let mut c = String::with_capacity(content.len());
     let mut content = content.as_ref();
     while let Ok((skipped, m, r)) = parser::mention(content) {
-        let npub = if m.domain.map_or(false, |d| d == DOMAIN) {
+        let npub = if m.domain == Some(DOMAIN) {
             PublicKey::from_bech32(m.username).ok()
         } else {
             let tmp;

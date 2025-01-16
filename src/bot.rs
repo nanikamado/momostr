@@ -56,7 +56,7 @@ async fn handle_command_from_nostr_account(
             if state
                 .db
                 .get_followers_of_nostr(author)
-                .map_or(false, |a| !a.is_empty())
+                .is_some_and(|a| !a.is_empty())
             {
                 "Restarted.".to_string()
             } else {
@@ -69,7 +69,7 @@ async fn handle_command_from_nostr_account(
         } else if state
             .db
             .get_followers_of_nostr(author)
-            .map_or(false, |a| !a.is_empty())
+            .is_some_and(|a| !a.is_empty())
         {
             "We are already bridging your account.".to_string()
         } else {

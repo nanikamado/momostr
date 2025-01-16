@@ -450,7 +450,7 @@ pub async fn http_get_user(
     if headers
         .get(reqwest::header::ACCEPT)
         .and_then(|a| a.to_str().ok())
-        .map_or(false, |a| a.contains("text/html") && !a.contains("json"))
+        .is_some_and(|a| a.contains("text/html") && !a.contains("json"))
     {
         debug!("redirect");
         Ok(Redirect::to(&format!(

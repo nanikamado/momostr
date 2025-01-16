@@ -323,7 +323,7 @@ fn handle_event(
                         let id = id.clone();
                         tokio::spawn(async move {
                             if let Some(m) = state.db.delete_event_id(event_id.as_bytes()).await {
-                                if m.author.map_or(false, |a| a != author_d) {
+                                if m.author.is_some_and(|a| a != author_d) {
                                     return;
                                 }
                                 let event_id = event_id.to_bech32().unwrap();
@@ -925,10 +925,7 @@ impl Note {
                     uppercase: false,
                     ..
                 }) => {
-                    if !quote
-                        .as_ref()
-                        .map_or(false, |a| &a.author_npub == public_key)
-                    {
+                    if quote.as_ref().is_none_or(|a| &a.author_npub != public_key) {
                         let (href, name) = (*get_ap_id_and_handle_from_public_key(
                             state,
                             public_key,
@@ -944,7 +941,7 @@ impl Note {
                 }
                 _ => (),
             }
-            if t.as_vec().first().map_or(false, |a| a == "nobridge") {
+            if t.as_vec().first().is_some_and(|a| a == "nobridge") {
                 return None;
             }
         }
