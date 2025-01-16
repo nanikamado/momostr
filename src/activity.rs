@@ -891,6 +891,7 @@ impl AppState {
                 "https://{host}/.well-known/webfinger?resource=acct:{name}@{host}"
             ))
             .header(reqwest::header::USER_AGENT, &*USER_AGENT)
+            .header(reqwest::header::ACCEPT, "application/jrd+json")
             .send()
             .await
             .map_err(|e| Error::NotFoundWithMsg(e.to_string()))?
