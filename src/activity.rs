@@ -318,11 +318,11 @@ pub struct NoteForDe {
     pub source: Option<Source>,
     pub published: DateTime<Utc>,
     pub in_reply_to: Option<String>,
-    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
     pub tag: Vec<NoteTagForDe>,
-    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
     pub attachment: Vec<AttachedImage>,
     #[serde(default)]
     pub url: ActorUrl,
@@ -332,11 +332,11 @@ pub struct NoteForDe {
     // threads.net only provides `_misskey_quote`
     #[serde(rename = "_misskey_quote")]
     pub misskey_quote: Option<String>,
-    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
     pub to: Vec<String>,
-    #[serde_as(as = "VecSkipError<_>")]
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
     pub cc: Vec<String>,
     pub sensitive: Option<bool>,
     pub summary: Option<String>,
@@ -380,7 +380,7 @@ pub enum ActivityForDeInner<'a> {
         content: Option<Cow<'a, str>>,
         id: Cow<'a, str>,
         #[serde(default)]
-        #[serde_as(as = "VecSkipError<_>")]
+        #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
         tag: Vec<NoteTagForDe>,
     },
     Announce {
@@ -388,8 +388,10 @@ pub enum ActivityForDeInner<'a> {
         object: StrOrId<'a>,
         published: DateTime<Utc>,
         #[serde(default)]
+        #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
         to: Vec<Cow<'a, str>>,
         #[serde(default)]
+        #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
         cc: Vec<Cow<'a, str>>,
     },
     Update {
@@ -875,8 +877,10 @@ impl AppState {
         name: &str,
         host: &str,
     ) -> Result<String, Error> {
+        #[serde_as]
         #[derive(Deserialize, Debug)]
         struct WebfingerResponse<'a> {
+            #[serde_as(deserialize_as = "VecSkipError<_>")]
             links: Vec<WebfingerLink<'a>>,
         }
         #[derive(Deserialize, Debug)]
@@ -1044,9 +1048,10 @@ pub struct ActorForParse {
     url: ActorUrl,
     proxy_of: Option<ProxyOf>,
     #[serde(default)]
-    #[serde_as(as = "VecSkipError<_>")]
+    #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
     tag: Vec<NoteTagForDe>,
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError<VecSkipError<_>>")]
     attachment: Vec<ActorAttachment>,
 }
 
@@ -1341,6 +1346,16 @@ mod tests {
     fn note_de_4() {
         let a = r###"{"type":"Note","id":"https://example.com/aaaaaaaaa","attributedTo":"https://example.com/aaaaaaaaa","to":["https://www.w3.org/ns/activitystreams#Public"],"name":"aaaaaaaaa","cc":[],"content":"<h2>aaaaaaaaa &amp; aaaaaaaaa</h2>\n<p>aaaaaaaaa, <em>aaaaaaaaa</em>, aaaaaaaaa <strong>aaaaaaaaa &amp; aaaaaaaaa</strong>, aaaaaaaaa <a href=\"https://x.com/aaaaaaaaa/status/aaaaaaaaa\" rel=\"nofollow\">aaaaaaaaa</a>.</p>\n<p><strong>aaaaaaaaa</strong>:</p>\n<ul>\n<li>aaaaaaaaa</li>\n<li>aaaaaaaaa.</li>\n</ul>\n<p><strong>aaaaaaaaa</strong>:\naaaaaaaaa</p>\n<hr />\n<p>aaaaaaaaa</p>\n","mediaType":"text/html","source":"aaa","attachment":[{"href":"https://aaaaaaaaa.com/aaaaaaaaa","mediaType":"text/html; charset=utf-8","type":"Link"}],"image":{"type":"Image","url":"https://lemmy.zip/pictrs/image/aaaaaaaaa.webp"},"sensitive":false,"published":"2024-08-02T08:26:41.080977Z","language":{"identifier":"en","name":"English"},"audience":"https://lemmy.world/c/retrogaming","tag":[{"href":"https://lemmy.zip/post/aaaaaaaaa","name":"#aaaaaaaaa","type":"Hashtag"}]}"###;
         let _: NoteForDe = serde_json::from_str(a).unwrap();
+    }
+
+    #[test]
+    fn announce_de_1() {
+        let a = r##"{"@context":["https://www.w3.org/ns/activitystreams","",{"@language":"und"}],"bto":[],"cc":null,"context":"","id":"","object":"","published":"2025-01-05T15:41:18.669686Z","to":["","",null,"https://www.w3.org/ns/activitystreams#Public"],"type":"Announce"}"##;
+        if let ActivityForDeInner::Announce { to, .. } = serde_json::from_str(a).unwrap() {
+            assert_eq!(to.len(), 3);
+        } else {
+            panic!()
+        }
     }
 
     #[test]
