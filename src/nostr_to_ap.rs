@@ -9,8 +9,7 @@ use crate::nostr::{get_nostr_user_data, NostrUser, PoolTypesInstance};
 use crate::server::{metadata_to_activity, AppState};
 use crate::util::get_media_type;
 use crate::{
-    AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG, OUTBOX_RELAYS_FOR_10002,
-    REVERSE_DNS, USER_ID_PREFIX,
+    AP_RELAYS, BOT_PUB, DOMAIN, HTTPS_DOMAIN, NOTE_ID_PREFIX, NPUB_REG, REVERSE_DNS, USER_ID_PREFIX,
 };
 use futures_util::StreamExt;
 use html_escape::{encode_double_quoted_attribute, encode_text};
@@ -973,21 +972,9 @@ impl Note {
             }
         }
         let author = format!("{USER_ID_PREFIX}{}", event.author().to_bech32().unwrap());
-        let nevent = Nip19Event {
-            event_id: event.id,
-            author: None,
-            kind: None,
-            relays: OUTBOX_RELAYS_FOR_10002
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        }
-        .to_bech32()
-        .unwrap();
         Some(Note {
             author,
             id,
-            nevent,
             content: content.html,
             misskey_content: content.misskey,
             published,

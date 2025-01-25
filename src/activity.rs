@@ -42,7 +42,6 @@ pub struct Attachment {
 pub struct Note {
     pub author: String,
     pub id: String,
-    pub nevent: String,
     pub content: String,
     pub misskey_content: String,
     pub published: String,
@@ -95,10 +94,6 @@ impl Serialize for Note {
         let mut m = serializer.serialize_map(None)?;
         m.serialize_entry("type", "Note")?;
         m.serialize_entry("id", &format_args!("{NOTE_ID_PREFIX}{}", self.id))?;
-        m.serialize_entry(
-            "url",
-            &format_args!("https://coracle.social/{}", self.nevent),
-        )?;
         m.serialize_entry(
             "proxyOf",
             &[&json!({

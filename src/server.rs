@@ -22,7 +22,7 @@ use itertools::Itertools;
 use linkify::{LinkFinder, LinkKind};
 use lru::LruCache;
 use nodeinfo::nodeinfo;
-use nostr_lib::nips::nip19::Nip19Profile;
+use nostr_lib::nips::nip19::{Nip19Event, Nip19Profile};
 use nostr_lib::{EventId, FromBech32, Metadata, PublicKey, ToBech32};
 use parking_lot::Mutex;
 use regex::Regex;
@@ -517,15 +517,36 @@ impl IntoResponse for JsonActivity {
 pub async fn http_get_note(
     Path(note): Path<String>,
     State(state): State<Arc<AppState>>,
-) -> Result<JsonActivity, Error> {
-    info!("");
+    headers: HeaderMap,
+) -> Result<axum::http::Response<axum::body::Body>, Error> {
     let note_id = EventId::from_bech32(&note).map_err(|_| Error::NotFound)?;
-    let note = state.get_note(note_id).await.ok_or(Error::NotFound)?;
-    let note = Note::from_nostr_event(&state, &note.event)
-        .await
-        .ok_or(Error::NotFound)?;
-    let s = serde_json::to_string(&WithContext(&note)).unwrap();
-    Ok(JsonActivity(s))
+    if headers
+        .get(reqwest::header::ACCEPT)
+        .and_then(|a| a.to_str().ok())
+        .is_some_and(|a| a.contains("text/html") && !a.contains("json"))
+    {
+        debug!("redirect");
+        let nevent = Nip19Event {
+            event_id: note_id,
+            author: None,
+            kind: None,
+            relays: OUTBOX_RELAYS_FOR_10002
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+        .to_bech32()
+        .unwrap();
+        Ok(Redirect::to(&format!("https://coracle.social/{nevent}")).into_response())
+    } else {
+        debug!("activity");
+        let note = state.get_note(note_id).await.ok_or(Error::NotFound)?;
+        let note = Note::from_nostr_event(&state, &note.event)
+            .await
+            .ok_or(Error::NotFound)?;
+        let s = serde_json::to_string(&WithContext(&note)).unwrap();
+        Ok(JsonActivity(s).into_response())
+    }
 }
 
 #[debug_handler]
