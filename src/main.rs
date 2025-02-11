@@ -76,6 +76,13 @@ static AP_RELAYS: Lazy<Vec<&str>> = Lazy::new(|| {
         .filter(|a| !a.is_empty())
         .collect_vec()
 });
+static DELETION_RELAY_DENY_LIST: Lazy<Vec<&str>> = Lazy::new(|| {
+    option_env!("DELETION_RELAY_DENY_LIST")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .collect_vec()
+});
 const CONTACT_LIST_LEN_LIMIT: usize = 500;
 static BOT_SEC: Lazy<SecretKey> = Lazy::new(|| SecretKey::from_bech32(env!("BOT_NSEC")).unwrap());
 static BOT_KEYPAIR: Lazy<Arc<secp256k1::Keypair>> = Lazy::new(|| {

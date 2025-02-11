@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::{REVERSE_DNS, USER_AGENT};
+use crate::{DELETION_RELAY_DENY_LIST, REVERSE_DNS, USER_AGENT};
 use axum::http::HeaderValue;
 use futures_util::{SinkExt, StreamExt};
 use itertools::Itertools;
@@ -7,6 +7,7 @@ use nostr_lib::event::TagStandard;
 use nostr_lib::{Event, EventBuilder, EventId, Keys, SecretKey};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Serialize, Serializer};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_tungstenite::connect_async;
@@ -19,6 +20,10 @@ pub struct EventDeletionQueue(tokio::sync::mpsc::Sender<(EventId, nostr_lib::Kin
 
 impl EventDeletionQueue {
     pub fn new(http_client: Arc<reqwest::Client>) -> Self {
+        let relay_deny_list: FxHashSet<_> = DELETION_RELAY_DENY_LIST
+            .iter()
+            .flat_map(|a| url::Url::from_str(a))
+            .collect();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1_000);
         tokio::spawn(async move {
             loop {
@@ -32,7 +37,7 @@ impl EventDeletionQueue {
                     .format_with(", ", |(e, _, _), f| f(&format_args!("{e}")))
                     .to_string();
                 debug!("start deletion of {ids}");
-                if let Err(e) = delete_async(buff, &http_client, &ids).await {
+                if let Err(e) = delete_async(buff, &http_client, &ids, &relay_deny_list).await {
                     error!("{e:?}");
                 }
                 debug!("deleted {ids}");
@@ -76,6 +81,7 @@ async fn delete_async(
     es: Vec<(EventId, nostr_lib::Kind, SecretKey)>,
     http_client: &reqwest::Client,
     ids_for_log: &str,
+    relay_deny_list: &FxHashSet<url::Url>,
 ) -> Result<(), Error> {
     let relays: Vec<url::Url> = http_client
         .get("https://api.nostr.watch/v1/nip/1")
@@ -86,6 +92,9 @@ async fn delete_async(
     let es = create_deletion_events(es);
     let relays_len = relays.len();
     for (i, r) in relays.into_iter().enumerate() {
+        if relay_deny_list.contains(&r) {
+            continue;
+        }
         let mut req = r.as_str().into_client_request()?;
         let headers = req.headers_mut();
         headers.insert(
