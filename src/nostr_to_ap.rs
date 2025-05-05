@@ -157,7 +157,7 @@ fn handle_event(
             tokio::spawn(async move {
                 let followers = {
                     let followers = state.db.get_followers_of_nostr(&event.author());
-                    if !ps.is_empty() || !followers.as_ref().map_or(true, |a| a.is_empty()) {
+                    if !ps.is_empty() || !followers.as_ref().is_none_or(|a| a.is_empty()) {
                         Some(followers.unwrap_or_default())
                     } else {
                         None
@@ -459,7 +459,7 @@ fn handle_event(
         }
         nostr_lib::Kind::Metadata => {
             let followers = state.db.get_followers_of_nostr(&event.author());
-            if !followers.as_ref().map_or(true, |a| a.is_empty()) {
+            if !followers.as_ref().is_none_or(|a| a.is_empty()) {
                 if let Ok(metadata) = Metadata::from_json(&event.content) {
                     debug!("metadata update");
                     let followers = followers.unwrap().clone();
