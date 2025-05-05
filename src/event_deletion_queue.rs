@@ -4,6 +4,7 @@ use axum::http::HeaderValue;
 use futures_util::{SinkExt, StreamExt};
 use itertools::Itertools;
 use nostr_lib::event::TagStandard;
+use nostr_lib::types::Timestamp;
 use nostr_lib::{Event, EventBuilder, EventId, Keys, SecretKey};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Serialize, Serializer};
@@ -66,7 +67,13 @@ pub fn create_deletion_events(es: Vec<(EventId, nostr_lib::Kind, SecretKey)>) ->
         .map(|(_, (nsec, ks, ids))| {
             serde_json::to_string(&ClientMessage(
                 EventBuilder::delete(ids)
-                    .add_tags([TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into()])
+                    .add_tags([
+                        TagStandard::LabelNamespace(REVERSE_DNS.to_string()).into(),
+                        TagStandard::Expiration(
+                            Timestamp::now() + Duration::from_secs(60 * 60 * 24 * 30),
+                        )
+                        .into(),
+                    ])
                     .add_tags(ks.iter().map(|k| TagStandard::Kind(*k).into()))
                     .to_event(&Keys::new(nsec))
                     .unwrap(),
