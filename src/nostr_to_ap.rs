@@ -1212,18 +1212,22 @@ mod tests {
             .await
     }
 
+    const SAMPLE_IMAGE: &str = "https://avatars.githubusercontent.com/u/40970181";
+
     #[test]
     fn media_test_1() {
-        let s = r#"aaa!!
+        let s = format!(
+            r#"aaa!!
 
 https://example.com
 
-<img src="https://pbs.twimg.com/profile_banners/12/1688241283/1500x500"/>
+<img src="{SAMPLE_IMAGE}"/>
 
 https://example.com
-        "#;
+        "#
+        );
         RT.block_on(async {
-            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
             assert!(q.is_none());
             assert_eq!(content.misskey, s.trim());
             assert_eq!(media.len(), 1);
@@ -1232,16 +1236,18 @@ https://example.com
 
     #[test]
     fn media_test_2() {
-        let s = r#"#あああ
+        let s = format!(
+            r#"#あああ
 いいい
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
+{SAMPLE_IMAGE}
+{SAMPLE_IMAGE}
 
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
-"#;
+{SAMPLE_IMAGE}
+{SAMPLE_IMAGE}
+"#
+        );
         RT.block_on(async {
-            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
             assert!(q.is_none());
             assert_eq!(content.misskey, "#あああ\nいいい\n");
             assert_eq!(media.len(), 4);
@@ -1250,22 +1256,26 @@ https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 
     #[test]
     fn media_test_3() {
-        let s = r#"#あああ
+        let s = format!(
+            r#"#あああ
 いいい
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
+{SAMPLE_IMAGE}
 う
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
+{SAMPLE_IMAGE}
 https://i.gyazo.com/09026f13790f738e9cd379354eefe6db.jpg
-"#;
+"#
+        );
         RT.block_on(async {
-            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
             assert!(q.is_none());
             assert_eq!(
                 content.misskey,
-                "#あああ
+                format!(
+                    "#あああ
 いいい
-https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
+{SAMPLE_IMAGE}
 う\n"
+                )
             );
             assert_eq!(media.len(), 3);
         })
@@ -1273,13 +1283,15 @@ https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
 
     #[test]
     fn media_test_4() {
-        let s = r#"
+        let s = format!(
+            r#"
 
-        https://pbs.twimg.com/profile_banners/12/1688241283/1500x500
+        {SAMPLE_IMAGE}
 
-        "#;
+        "#
+        );
         RT.block_on(async {
-            let (media, content, q) = media(get_state().await, s, &mut FxHashMap::default()).await;
+            let (media, content, q) = media(get_state().await, &s, &mut FxHashMap::default()).await;
             assert!(q.is_none());
             assert_eq!(content.html, "");
             assert_eq!(media.len(), 1);
